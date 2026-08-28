@@ -1,0 +1,28 @@
+{
+  "name": "cantonsyndex",
+  "version": "0.1.0",
+  "description": "Privacy-Preserving Syndicated Loan & Tranche Lifecycle Engine on Canton Network",
+  "main": "dist/bridge/index.js",
+  "types": "dist/bridge/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "start": "node dist/bridge/index.js",
+    "lint": "eslint src --ext .ts",
+    "test": "jest"
+  },
+  "keywords": ["canton", "daml", "syndicated-lending", "blockchain", "capital-markets"],
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0"
+  },
+  "peerDependencies": {
+    "@canton-network/dapp-sdk": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@canton-network/dapp-sdk": {
+      "optional": true
+    }
+  }
+}

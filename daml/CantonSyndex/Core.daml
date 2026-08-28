@@ -1,0 +1,134 @@
+-- | CantonSyndex.Core
+-- Privacy-Preserving Syndicated Loan & Tranche Lifecycle Engine
+-- Canton Network / DAML 2.x
+--
+-- This module contains the core smart contract templates that model
+-- the full lifecycle of a syndicated loan facility with strict
+-- sub-transaction privacy enforced by the Canton cryptographic protocol.
+module CantonSyndex.Core where
+
+import DA.Optional (optionalToList)
+
+-- ---------------------------------------------------------------------------
+-- | MasterFacility
+--
+-- Global facility contract jointly signed by the Borrower and the Lead Agent.
+-- Encodes the top-level credit limit, currency, and aggregate drawn amount.
+--
+-- PRIVACY: Participant lenders are NOT observers on this contract.
+--          They cannot see each other's allocations, margin spreads, or fees.
+--          An optional Regulator party may be added as a read-only observer
+--          for systemic-risk and capital-adequacy oversight.
+-- ---------------------------------------------------------------------------
+template MasterFacility
+  with
+    facilityId    : Text
+      -- ^ Unique reference identifier (e.g. "FAC-2026-USD-100M")
+    borrower      : Party
+      -- ^ Corporate or sovereign borrower
+    agent         : Party
+      -- ^ Lead arranger / facility agent bank
+    currency      : Text
+      -- ^ ISO 4217 currency code (e.g. "USD", "EUR")
+    totalLimit    : Decimal
+      -- ^ Maximum aggregate credit commitment (e.g. 100_000_000.0)
+    drawnAmount   : Decimal
+      -- ^ Aggregate amount currently drawn by the borrower
+    isActive      : Bool
+      -- ^ Whether the facility is open for further drawdowns
+    regulator     : Optional Party
+      -- ^ Optional read-only compliance observer (e.g. central bank)
+  where
+    signatory borrower, agent
+    observer (optionalToList regulator)
+
+    -- Contract invariants enforced at creation and every state transition
+    ensure
+      totalLimit > 0.0 &&
+      drawnAmount >= 0.0 &&
+      drawnAmount <= totalLimit
+
+    -- -----------------------------------------------------------------------
+    -- Choice: SyndicateTranche
+    -- Controller: agent (Lead Arranger)
+    --
+    -- Provisions a bilateral commitment for a single participant lender.
+    -- The resulting TrancheParticipation is visible ONLY to the agent and
+    -- the specific lender — all other banks have zero knowledge of its terms.
+    -- -----------------------------------------------------------------------
+    nonconsuming choice SyndicateTranche : ContractId TrancheParticipation
+      with
+        lender           : Party
+          -- ^ Participant bank receiving the bilateral allocation
+        commitmentAmount : Decimal
+          -- ^ Dollar commitment for this lender (must fit within headroom)
+        marginSpreadBps  : Decimal
+          -- ^ Negotiated margin in basis points (e.g. 150.0 = 1.50%)
+      controller agent
+      do
+        assertMsg
+          "Commitment exceeds total facility headroom"
+          (commitmentAmount <= (totalLimit - drawnAmount))
+        assertMsg
+          "Commitment amount must be positive"
+          (commitmentAmount > 0.0)
+        assertMsg
+          "Margin spread must be non-negative"
+          (marginSpreadBps >= 0.0)
+        create TrancheParticipation with
+          facilityId
+          agent
+          borrower
+          lender
+          commitmentAmount
+          drawnAmount      = 0.0
+          marginSpreadBps
+          isActive         = True
+
+    -- -----------------------------------------------------------------------
+    -- Choice: RequestDrawdown
+    -- Controller: borrower
+    --
+    -- Triggers an atomic drawdown event against remaining facility headroom.
+    -- Creates an immutable DrawdownExecution audit record and advances the
+    -- aggregate drawn counter on the MasterFacility.
+    -- -----------------------------------------------------------------------
+    choice RequestDrawdown : (ContractId MasterFacility, ContractId DrawdownExecution)
+      with
+        drawdownId : Text
+          -- ^ Unique drawdown reference (e.g. "DRAW-001")
+        amount     : Decimal
+          -- ^ Requested drawdown amount (must not exceed headroom)
+      controller borrower
+      do
+        assertMsg
+          "Facility is currently inactive"
+          isActive
+        assertMsg
+          "Requested amount exceeds available headroom"
+          (amount <= (totalLimit - drawnAmount))
+        assertMsg
+          "Drawdown amount must be positive"
+          (amount > 0.0)
+        updatedFacilityCid <- create this with
+          drawnAmount = drawnAmount + amount
+        drawdownCid <- create DrawdownExecution with
+          facilityId
+          drawdownId
+          borrower
+          agent
+          amount
+          executed = False
+        return (updatedFacilityCid, drawdownCid)
+
+    -- -----------------------------------------------------------------------
+    -- Choice: DeactivateFacility
+    -- Controller: agent
+    --
+    -- Permanently closes the facility for further drawdowns.
+    -- Existing tranches and receipts are unaffected.
+    -- -----------------------------------------------------------------------
+    choice DeactivateFacility : ContractId MasterFacility
+      controller agent
+      do
+        create this with isActive = False

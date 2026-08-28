@@ -1,0 +1,54 @@
+-- | CantonSyndex.Types
+-- Shared type aliases and helper definitions for the CantonSyndex module.
+-- Import this module to avoid circular dependency issues with Core.daml.
+module CantonSyndex.Types where
+
+-- | ISO 4217 currency code type alias
+type CurrencyCode = Text
+
+-- | Basis points as a Decimal (e.g. 150.0 = 1.50%)
+type BasisPoints = Decimal
+
+-- | Unique facility identifier
+type FacilityId = Text
+
+-- | Unique drawdown identifier
+type DrawdownId = Text
+
+-- | ISO-8601 timestamp as Text
+type Timestamp = Text
+
+-- | Status of a syndicated loan facility
+data FacilityStatus
+  = Active
+    -- ^ Facility is open for drawdowns and tranche syndication
+  | Inactive
+    -- ^ Facility has been deactivated by the agent
+  | DefaultedBorrower
+    -- ^ Borrower has defaulted; covenant enforcement in progress
+  deriving (Show, Eq)
+
+-- | Repayment breakdown for settlement calculations
+data RepaymentBreakdown = RepaymentBreakdown
+  with
+    principal : Decimal
+      -- ^ Principal portion of the repayment
+    interest  : Decimal
+      -- ^ Interest portion based on margin spread and time
+    fees      : Decimal
+      -- ^ Any applicable facility or agent fees
+  deriving (Show, Eq)
+
+-- | Calculate interest amount from principal, spread, and term in days
+calculateInterest : Decimal -> BasisPoints -> Int -> Decimal
+calculateInterest principal spreadBps days =
+  let annualRate = spreadBps / 10000.0  -- Convert bps to decimal
+      dailyRate  = annualRate / 365.0
+  in principal * dailyRate * (intToDecimal days)
+
+-- | Calculate pro-rata share for a lender given their commitment vs total
+calculateProRataShare : Decimal -> Decimal -> Decimal -> Decimal
+calculateProRataShare lenderCommitment totalCommitment totalAmount =
+  if totalCommitment == 0.0
+    then 0.0
+    else (lenderCommitment / totalCommitment) * totalAmount

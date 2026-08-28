@@ -1,0 +1,216 @@
+-- | CantonSyndex.Test
+-- Complete DAML Script lifecycle test for the CantonSyndex syndicated loan engine.
+--
+-- This script validates:
+--   1. MasterFacility creation and constraint enforcement
+--   2. Tranche syndication with bilateral privacy guarantees
+--   3. Borrower drawdown and pro-rata distribution
+--   4. Privacy isolation: Bank A cannot query Bank B's contracts
+--   5. Repayment settlement and receipt generation
+--   6. Facility deactivation
+--
+-- Run with:
+--   daml test --files daml/CantonSyndex/Test.daml
+module CantonSyndex.Test where
+
+import Daml.Script
+import CantonSyndex.Core
+
+-- ---------------------------------------------------------------------------
+-- | Main lifecycle test: $100M USD syndicated facility
+-- ---------------------------------------------------------------------------
+testSyndicatedLoanLifecycle : Script ()
+testSyndicatedLoanLifecycle = script do
+
+  -- =========================================================================
+  -- STEP 0: Allocate Canton Participant Parties
+  -- =========================================================================
+  borrower <- allocatePartyWithHint "BorrowerCorp"  (PartyIdHint "BORROWER")
+  agent    <- allocatePartyWithHint "GlobalLeadBank" (PartyIdHint "AGENT")
+  bankA    <- allocatePartyWithHint "AlphaBank"      (PartyIdHint "BANK_A")
+  bankB    <- allocatePartyWithHint "BetaBank"       (PartyIdHint "BANK_B")
+  regulator <- allocatePartyWithHint "CentralBank"   (PartyIdHint "REGULATOR")
+
+  -- =========================================================================
+  -- STEP 1: Establish Master Facility ($100M USD)
+  -- Signatories: borrower + agent
+  -- Observer: regulator (read-only systemic oversight)
+  -- =========================================================================
+  facilityCid <- submitMulti [borrower, agent] [] do
+    createCmd MasterFacility with
+      facilityId  = "FAC-2026-USD-100M"
+      borrower    = borrower
+      agent       = agent
+      currency    = "USD"
+      totalLimit  = 100_000_000.0
+      drawnAmount = 0.0
+      isActive    = True
+      regulator   = Some regulator
+
+  -- Verify regulator can query the facility (read-only observer)
+  regulatorView <- queryFilter @MasterFacility regulator
+    (\f -> f.facilityId == "FAC-2026-USD-100M")
+  assertMsg "Regulator should see the facility" (length regulatorView == 1)
+
+  -- =========================================================================
+  -- STEP 2: Syndicate Tranches (Bilateral Allocations)
+  -- Bank A: $60M @ 150 bps (1.50% margin)
+  -- Bank B: $40M @ 175 bps (1.75% margin) — different negotiated terms
+  -- =========================================================================
+  trancheACid <- submit agent do
+    exerciseCmd facilityCid SyndicateTranche with
+      lender           = bankA
+      commitmentAmount = 60_000_000.0
+      marginSpreadBps  = 150.0
+
+  trancheBCid <- submit agent do
+    exerciseCmd facilityCid SyndicateTranche with
+      lender           = bankB
+      commitmentAmount = 40_000_000.0
+      marginSpreadBps  = 175.0
+
+  -- Verify each bank can see their own tranche
+  bankAOwnTranches <- queryFilter @TrancheParticipation bankA
+    (\t -> t.lender == bankA)
+  assertMsg "Bank A should see its own tranche" (length bankAOwnTranches == 1)
+
+  bankBOwnTranches <- queryFilter @TrancheParticipation bankB
+    (\t -> t.lender == bankB)
+  assertMsg "Bank B should see its own tranche" (length bankBOwnTranches == 1)
+
+  -- =========================================================================
+  -- STEP 3: PRIVACY ISOLATION VERIFICATION (CRITICAL TEST)
+  --
+  -- Bank A queries for contracts where lender == bankB.
+  -- Due to Canton sub-transaction privacy, Bank A has ZERO mathematical
+  -- visibility into Bank B's TrancheParticipation contract.
+  -- This assertion MUST return an empty list.
+  -- =========================================================================
+  bankAVisibleBTranches <- queryFilter @TrancheParticipation bankA
+    (\t -> t.lender == bankB)
+  assertMsg
+    "PRIVACY VIOLATION: Bank A must not see Bank B's tranche allocation"
+    (null bankAVisibleBTranches)
+
+  -- Reciprocal: Bank B cannot see Bank A's tranche
+  bankBVisibleATranches <- queryFilter @TrancheParticipation bankB
+    (\t -> t.lender == bankA)
+  assertMsg
+    "PRIVACY VIOLATION: Bank B must not see Bank A's tranche allocation"
+    (null bankBVisibleATranches)
+
+  -- =========================================================================
+  -- STEP 4: Borrower Requests $20M Drawdown
+  -- =========================================================================
+  (updatedFacilityCid, drawdownCid) <- submit borrower do
+    exerciseCmd facilityCid RequestDrawdown with
+      drawdownId = "DRAW-001"
+      amount     = 20_000_000.0
+
+  -- Verify facility drawn amount updated
+  facilityState <- queryContractId borrower updatedFacilityCid
+  case facilityState of
+    None    -> assertFail "Updated facility contract not found"
+    Some fc -> assertMsg
+      "Facility drawnAmount should be $20M after drawdown"
+      (fc.drawnAmount == 20_000_000.0)
+
+  -- =========================================================================
+  -- STEP 5: Agent Distributes Pro-Rata Drawdown
+  -- Bank A gets 60% of $20M = $12M
+  -- Bank B gets 40% of $20M = $8M
+  -- =========================================================================
+  updatedTrancheACid <- submit agent do
+    exerciseCmd trancheACid ApplyTrancheDrawdown with
+      drawAmount = 12_000_000.0
+
+  updatedTrancheBCid <- submit agent do
+    exerciseCmd trancheBCid ApplyTrancheDrawdown with
+      drawAmount = 8_000_000.0
+
+  -- Verify Bank A drawn balance
+  trancheAState <- queryContractId agent updatedTrancheACid
+  case trancheAState of
+    None    -> assertFail "Updated tranche A not found"
+    Some ta -> assertMsg
+      "Bank A drawn amount should be $12M"
+      (ta.drawnAmount == 12_000_000.0)
+
+  -- Mark drawdown as executed
+  _ <- submit agent do
+    exerciseCmd drawdownCid MarkDrawdownExecuted
+
+  -- =========================================================================
+  -- STEP 6: Repayment Settlement ($5M principal + interest for Bank A)
+  -- =========================================================================
+  (settledTrancheACid, receiptACid) <- submit agent do
+    exerciseCmd updatedTrancheACid SettleRepayment with
+      principalPaid = 5_000_000.0
+      interestPaid  = 25_000.0  -- 5M * 1.50% * 30/365 ≈ $6,164 (simplified)
+      timestamp     = "2026-09-28T00:00:00Z"
+
+  -- Verify Bank A can read their repayment receipt
+  bankAReceipts <- queryFilter @RepaymentReceipt bankA
+    (\r -> r.lender == bankA)
+  assertMsg "Bank A should receive repayment receipt" (length bankAReceipts == 1)
+
+  -- Bank B should NOT see Bank A's receipt (strict privacy)
+  bankBVisibleAReceipts <- queryFilter @RepaymentReceipt bankB
+    (\r -> r.lender == bankA)
+  assertMsg
+    "PRIVACY VIOLATION: Bank B must not see Bank A's repayment receipt"
+    (null bankBVisibleAReceipts)
+
+  -- Verify settled tranche A drawn amount reduced
+  settledTrancheAState <- queryContractId agent settledTrancheACid
+  case settledTrancheAState of
+    None    -> assertFail "Settled tranche A not found"
+    Some st -> assertMsg
+      "Bank A drawn balance should be $7M after $5M repayment"
+      (st.drawnAmount == 7_000_000.0)
+
+  -- =========================================================================
+  -- STEP 7: Facility Deactivation
+  -- =========================================================================
+  deactivatedFacilityCid <- submit agent do
+    exerciseCmd updatedFacilityCid DeactivateFacility
+
+  finalFacilityState <- queryContractId agent deactivatedFacilityCid
+  case finalFacilityState of
+    None    -> assertFail "Deactivated facility not found"
+    Some ff -> assertMsg "Facility should be inactive" (not ff.isActive)
+
+  return ()
+
+-- ---------------------------------------------------------------------------
+-- | Negative test: Verify constraint violations are rejected
+-- ---------------------------------------------------------------------------
+testConstraintViolations : Script ()
+testConstraintViolations = script do
+
+  borrower <- allocatePartyWithHint "BorrowerCorp2" (PartyIdHint "BORROWER2")
+  agent    <- allocatePartyWithHint "AgentBank2"    (PartyIdHint "AGENT2")
+  bankA    <- allocatePartyWithHint "AlphaBank2"    (PartyIdHint "BANK_A2")
+
+  facilityCid <- submitMulti [borrower, agent] [] do
+    createCmd MasterFacility with
+      facilityId  = "FAC-2026-USD-50M"
+      borrower    = borrower
+      agent       = agent
+      currency    = "USD"
+      totalLimit  = 50_000_000.0
+      drawnAmount = 0.0
+      isActive    = True
+      regulator   = None
+
+  -- Test: Over-commitment should be rejected
+  result <- tryToEither $ submit agent do
+    exerciseCmd facilityCid SyndicateTranche with
+      lender           = bankA
+      commitmentAmount = 60_000_000.0  -- Exceeds $50M facility limit
+      marginSpreadBps  = 150.0
+  case result of
+    Left  _ -> return ()  -- Expected: constraint violation
+    Right _ -> assertFail "Over-commitment should have been rejected"
+
+  return ()

@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CantonSyndex — Syndicated Loan Operations Dashboard</title>
+  <meta name="description" content="Privacy-Preserving Syndicated Loan & Tranche Lifecycle Engine on Canton Network. Real-time facility monitoring with Canton sub-transaction privacy." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="index.css" />
+</head>
+<body>
+
+  <!-- ===== HEADER ===== -->
+  <header class="header" role="banner">
+    <div class="header-inner">
+      <div class="logo-group">
+        <div class="logo-icon" aria-hidden="true">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+            <polygon points="16,2 30,10 30,22 16,30 2,22 2,10" fill="url(#logoGrad)" stroke="rgba(139,92,246,0.4)" stroke-width="1"/>
+            <polygon points="16,8 24,13 24,19 16,24 8,19 8,13" fill="none" stroke="rgba(139,92,246,0.6)" stroke-width="1"/>
+            <circle cx="16" cy="16" r="3" fill="url(#logoGrad2)"/>
+            <defs>
+              <linearGradient id="logoGrad" x1="0" y1="0" x2="32" y2="32">
+                <stop offset="0%" stop-color="#8b5cf6"/>
+                <stop offset="100%" stop-color="#06b6d4"/>
+              </linearGradient>
+              <linearGradient id="logoGrad2" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#c4b5fd"/>
+                <stop offset="100%" stop-color="#67e8f9"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div>
+          <h1 class="logo-name">CantonSyndex</h1>
+          <p class="logo-sub">Canton Network · DAML 2.9.4</p>
+        </div>
+      </div>
+
+      <nav class="nav-tabs" role="navigation" aria-label="Main navigation">
+        <button class="tab-btn active" id="tab-overview"   data-tab="overview"   aria-selected="true">Overview</button>
+        <button class="tab-btn"        id="tab-tranches"   data-tab="tranches"   aria-selected="false">Tranches</button>
+        <button class="tab-btn"        id="tab-drawdown"   data-tab="drawdown"   aria-selected="false">Drawdown</button>
+        <button class="tab-btn"        id="tab-settlement" data-tab="settlement" aria-selected="false">Settlement</button>
+        <button class="tab-btn"        id="tab-audit"      data-tab="audit"      aria-selected="false">Audit Log</button>
+      </nav>
+
+      <div class="header-right">
+        <div class="party-selector" id="party-selector-wrap">
+          <label class="party-label" for="party-select">Active Party</label>
+          <select id="party-select" class="party-select" aria-label="Select active party">
+            <option value="agent">GlobalLeadBank (Agent)</option>
+            <option value="borrower">BorrowerCorp</option>
+            <option value="bankA">AlphaBank (Bank A)</option>
+            <option value="bankB">BetaBank (Bank B)</option>
+            <option value="regulator">CentralBank (Regulator)</option>
+          </select>
+        </div>
+        <div class="status-pill" id="ledger-status" role="status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span>Canton Ledger</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===== MAIN ===== -->
+  <main class="main" role="main">
+
+    <!-- ============================================================
+         TAB: OVERVIEW
+         ============================================================ -->
+    <section class="tab-panel active" id="panel-overview" aria-labelledby="tab-overview">
+
+      <!-- Facility Hero -->
+      <div class="facility-hero">
+        <div class="facility-hero-left">
+          <p class="facility-tag">Master Facility · FAC-2026-USD-100M</p>
+          <h2 class="facility-amount">$100,000,000</h2>
+          <p class="facility-currency">USD · GlobalLeadBank (Lead Arranger)</p>
+          <div class="facility-badges">
+            <span class="badge badge-active">Active</span>
+            <span class="badge badge-canton">Canton Network</span>
+            <span class="badge badge-privacy">Sub-TX Privacy</span>
+          </div>
+        </div>
+        <div class="facility-hero-right">
+          <div class="headroom-gauge-wrap">
+            <svg class="headroom-gauge" viewBox="0 0 200 120" aria-label="Facility utilization gauge">
+              <!-- Arc background -->
+              <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="rgba(139,92,246,0.15)" stroke-width="16" stroke-linecap="round"/>
+              <!-- Arc fill -->
+              <path id="gauge-arc" d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="url(#gaugeGrad)" stroke-width="16" stroke-linecap="round" stroke-dasharray="251" stroke-dashoffset="188"/>
+              <defs>
+                <linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stop-color="#8b5cf6"/>
+                  <stop offset="100%" stop-color="#06b6d4"/>
+                </linearGradient>
+              </defs>
+              <text x="100" y="95" text-anchor="middle" class="gauge-pct" id="gauge-pct-text">25%</text>
+              <text x="100" y="112" text-anchor="middle" class="gauge-label">Utilized</text>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <!-- KPI Cards -->
+      <div class="kpi-grid">
+        <div class="kpi-card" id="kpi-total">
+          <p class="kpi-label">Total Limit</p>
+          <p class="kpi-value" id="kpi-total-val">$100,000,000</p>
+          <p class="kpi-sub">USD · Fixed</p>
+        </div>
+        <div class="kpi-card" id="kpi-drawn">
+          <p class="kpi-label">Drawn Amount</p>
+          <p class="kpi-value highlight-amber" id="kpi-drawn-val">$20,000,000</p>
+          <p class="kpi-sub">20% utilized</p>
+        </div>
+        <div class="kpi-card" id="kpi-headroom">
+          <p class="kpi-label">Available Headroom</p>
+          <p class="kpi-value highlight-green" id="kpi-headroom-val">$80,000,000</p>
+          <p class="kpi-sub">80% remaining</p>
+        </div>
+        <div class="kpi-card" id="kpi-tranches">
+          <p class="kpi-label">Active Tranches</p>
+          <p class="kpi-value" id="kpi-tranches-val">2</p>
+          <p class="kpi-sub">AlphaBank · BetaBank</p>
+        </div>
+        <div class="kpi-card" id="kpi-drawdowns">
+          <p class="kpi-label">Total Drawdowns</p>
+          <p class="kpi-value" id="kpi-drawdowns-val">1</p>
+          <p class="kpi-sub">DRAW-001 executed</p>
+        </div>
+        <div class="kpi-card" id="kpi-privacy">
+          <p class="kpi-label">Privacy Model</p>
+          <p class="kpi-value highlight-purple" id="kpi-privacy-val">Canton</p>
+          <p class="kpi-sub">Sub-TX isolation</p>
+        </div>
+      </div>
+
+      <!-- Privacy Topology -->
+      <div class="section-card">
+        <h2 class="section-title">Canton Privacy Topology</h2>
+        <p class="section-desc">Sub-transaction privacy enforced at cryptographic protocol level — not application-layer access control.</p>
+        <div class="topology-grid">
+          <div class="topo-node topo-node--borrower">
+            <div class="topo-icon">🏢</div>
+            <div class="topo-name">BorrowerCorp</div>
+            <div class="topo-role">Borrower</div>
+            <div class="topo-sees">
+              <span class="topo-contract">MasterFacility ✓</span>
+              <span class="topo-contract">DrawdownExecution ✓</span>
+            </div>
+          </div>
+          <div class="topo-node topo-node--agent">
+            <div class="topo-icon">🏛️</div>
+            <div class="topo-name">GlobalLeadBank</div>
+            <div class="topo-role">Lead Agent</div>
+            <div class="topo-sees">
+              <span class="topo-contract">MasterFacility ✓</span>
+              <span class="topo-contract">TrancheParticipation (all) ✓</span>
+              <span class="topo-contract">DrawdownExecution ✓</span>
+              <span class="topo-contract">RepaymentReceipts ✓</span>
+            </div>
+          </div>
+          <div class="topo-node topo-node--bankA">
+            <div class="topo-icon">🏦</div>
+            <div class="topo-name">AlphaBank</div>
+            <div class="topo-role">Participant · Bank A</div>
+            <div class="topo-sees">
+              <span class="topo-contract">TrancheParticipation (own) ✓</span>
+              <span class="topo-contract topo-contract--blocked">Bank B Tranche ✗</span>
+              <span class="topo-contract">RepaymentReceipt (own) ✓</span>
+            </div>
+          </div>
+          <div class="topo-node topo-node--bankB">
+            <div class="topo-icon">🏦</div>
+            <div class="topo-name">BetaBank</div>
+            <div class="topo-role">Participant · Bank B</div>
+            <div class="topo-sees">
+              <span class="topo-contract">TrancheParticipation (own) ✓</span>
+              <span class="topo-contract topo-contract--blocked">Bank A Tranche ✗</span>
+              <span class="topo-contract">RepaymentReceipt (own) ✓</span>
+            </div>
+          </div>
+          <div class="topo-node topo-node--regulator">
+            <div class="topo-icon">⚖️</div>
+            <div class="topo-name">CentralBank</div>
+            <div class="topo-role">Regulator (Observer)</div>
+            <div class="topo-sees">
+              <span class="topo-contract">MasterFacility (read-only) ✓</span>
+              <span class="topo-contract topo-contract--blocked">Tranche Details ✗</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ============================================================
+         TAB: TRANCHES
+         ============================================================ -->
+    <section class="tab-panel" id="panel-tranches" aria-labelledby="tab-tranches">
+      <div class="section-card">
+        <div class="section-header">
+          <h2 class="section-title">Tranche Allocations</h2>
+          <button class="btn btn-primary" id="btn-new-tranche">+ Syndicate Tranche</button>
+        </div>
+        <div class="tranche-table-wrap">
+          <table class="data-table" id="tranche-table" aria-label="Tranche allocations">
+            <thead>
+              <tr>
+                <th>Lender</th>
+                <th>Commitment</th>
+                <th>Drawn</th>
+                <th>Headroom</th>
+                <th>Margin (bps)</th>
+                <th>Utilization</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="tranche-tbody">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- New Tranche Form -->
+      <div class="section-card" id="new-tranche-form" style="display:none;">
+        <h2 class="section-title">Syndicate New Tranche</h2>
+        <p class="section-desc">Controller: Agent (GlobalLeadBank). Creates a bilateral TrancheParticipation contract.</p>
+        <form id="tranche-form" class="form-grid" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="t-lender">Participant Lender</label>
+            <select id="t-lender" class="form-input" required>
+              <option value="">Select lender...</option>
+              <option value="bankA">AlphaBank</option>
+              <option value="bankB">BetaBank</option>
+              <option value="bankC">GammaBank</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="t-amount">Commitment Amount (USD)</label>
+            <input id="t-amount" class="form-input" type="number" min="1000000" step="1000000" placeholder="e.g. 30000000" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="t-bps">Margin Spread (bps)</label>
+            <input id="t-bps" class="form-input" type="number" min="0" step="0.5" placeholder="e.g. 150.0" required />
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="btn-submit-tranche">Submit SyndicateTranche</button>
+            <button type="button" class="btn btn-ghost" id="btn-cancel-tranche">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         TAB: DRAWDOWN
+         ============================================================ -->
+    <section class="tab-panel" id="panel-drawdown" aria-labelledby="tab-drawdown">
+      <div class="section-card">
+        <h2 class="section-title">Drawdown Operations</h2>
+        <p class="section-desc">Controller: Borrower (BorrowerCorp). Triggers atomic drawdown against facility headroom.</p>
+
+        <div class="drawdown-info-grid">
+          <div class="info-block">
+            <p class="info-label">Available Headroom</p>
+            <p class="info-value" id="draw-headroom">$80,000,000</p>
+          </div>
+          <div class="info-block">
+            <p class="info-label">Current Drawn</p>
+            <p class="info-value" id="draw-current">$20,000,000</p>
+          </div>
+          <div class="info-block">
+            <p class="info-label">Total Limit</p>
+            <p class="info-value">$100,000,000</p>
+          </div>
+        </div>
+
+        <form id="drawdown-form" class="form-grid" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="d-id">Drawdown Reference ID</label>
+            <input id="d-id" class="form-input" type="text" placeholder="e.g. DRAW-002" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="d-amount">Drawdown Amount (USD)</label>
+            <input id="d-amount" class="form-input" type="number" min="1" step="1000000" placeholder="e.g. 15000000" required />
+          </div>
+          <div class="form-group form-group--full">
+            <p class="form-hint">Pro-rata distribution: AlphaBank will receive 60% · BetaBank will receive 40%</p>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="btn-submit-draw">Submit RequestDrawdown</button>
+          </div>
+        </form>
+
+        <div class="events-feed" id="drawdown-events">
+          <h3 class="events-title">Recent Drawdown Events</h3>
+          <div id="draw-event-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         TAB: SETTLEMENT
+         ============================================================ -->
+    <section class="tab-panel" id="panel-settlement" aria-labelledby="tab-settlement">
+      <div class="section-card">
+        <h2 class="section-title">Repayment Settlement</h2>
+        <p class="section-desc">Controller: Agent. Settles principal + interest for a specific lender tranche and creates an immutable RepaymentReceipt.</p>
+
+        <form id="settlement-form" class="form-grid" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="s-lender">Lender Tranche</label>
+            <select id="s-lender" class="form-input" required>
+              <option value="">Select tranche...</option>
+              <option value="bankA">AlphaBank — $12M drawn @ 150bps</option>
+              <option value="bankB">BetaBank — $8M drawn @ 175bps</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="s-principal">Principal Repayment (USD)</label>
+            <input id="s-principal" class="form-input" type="number" min="0" step="100000" placeholder="e.g. 5000000" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="s-interest">Interest Payment (USD)</label>
+            <input id="s-interest" class="form-input" type="number" min="0" step="100" placeholder="e.g. 25000" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="s-ts">Settlement Timestamp</label>
+            <input id="s-ts" class="form-input" type="datetime-local" required />
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="btn-submit-settle">Submit SettleRepayment</button>
+          </div>
+        </form>
+
+        <div class="receipts-list" id="receipts-list">
+          <h3 class="events-title">Repayment Receipts</h3>
+          <div id="receipt-items">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         TAB: AUDIT LOG
+         ============================================================ -->
+    <section class="tab-panel" id="panel-audit" aria-labelledby="tab-audit">
+      <div class="section-card">
+        <h2 class="section-title">Regulatory Audit Log</h2>
+        <p class="section-desc">Immutable, time-ordered Canton ledger event stream. All events are cryptographically signed by their controlling parties.</p>
+        <div class="audit-timeline" id="audit-timeline" role="log" aria-live="polite">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ===== TOAST NOTIFICATIONS ===== -->
+  <div class="toast-container" id="toast-container" role="alert" aria-live="assertive" aria-atomic="true"></div>
+
+  <script src="main.js"></script>
+</body>
+</html>

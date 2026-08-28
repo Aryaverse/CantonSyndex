@@ -132,3 +132,107 @@ template MasterFacility
       controller agent
       do
         create this with isActive = False
+
+-- ---------------------------------------------------------------------------
+-- | TrancheParticipation
+--
+-- Strict bilateral agreement between the Lead Agent and a single participant
+-- lender. This is the privacy-critical contract — only the agent and the
+-- designated lender are signatories; no other party holds any visibility.
+--
+-- PRIVACY: Bank B has ZERO mathematical visibility into Bank A's allocation,
+--          negotiated margin spread, commitment fee, or drawn balance.
+--          This guarantee is enforced by Canton's cryptographic protocol,
+--          not by application-layer access control.
+-- ---------------------------------------------------------------------------
+template TrancheParticipation
+  with
+    facilityId       : Text
+      -- ^ Reference back to the parent MasterFacility
+    agent            : Party
+      -- ^ Lead Arranger / Facility Agent bank
+    borrower         : Party
+      -- ^ Corporate or sovereign borrower (not a signatory here)
+    lender           : Party
+      -- ^ This specific participant bank
+    commitmentAmount : Decimal
+      -- ^ Maximum this lender has agreed to fund (e.g. 60_000_000.0)
+    drawnAmount      : Decimal
+      -- ^ Amount currently drawn from this lender's commitment
+    marginSpreadBps  : Decimal
+      -- ^ Bilaterally negotiated margin in basis points (e.g. 150.0)
+    isActive         : Bool
+      -- ^ Whether this tranche is open for further drawdowns
+  where
+    signatory agent, lender
+    -- No observers — strict bilateral confidentiality
+    ensure
+      commitmentAmount > 0.0 &&
+      drawnAmount >= 0.0 &&
+      drawnAmount <= commitmentAmount
+
+    -- -----------------------------------------------------------------------
+    -- Choice: ApplyTrancheDrawdown
+    -- Controller: agent
+    --
+    -- Distributes a pro-rata share of a borrower drawdown to this tranche.
+    -- Called by the agent after RequestDrawdown succeeds on the MasterFacility.
+    -- -----------------------------------------------------------------------
+    choice ApplyTrancheDrawdown : ContractId TrancheParticipation
+      with
+        drawAmount : Decimal
+          -- ^ This lender's pro-rata share of the drawdown
+      controller agent
+      do
+        assertMsg
+          "Drawdown share exceeds remaining commitment quota"
+          (drawnAmount + drawAmount <= commitmentAmount)
+        assertMsg
+          "Draw amount must be positive"
+          (drawAmount > 0.0)
+        create this with drawnAmount = drawnAmount + drawAmount
+
+    -- -----------------------------------------------------------------------
+    -- Choice: SettleRepayment
+    -- Controller: agent
+    --
+    -- Processes a repayment from the borrower, reducing the drawn balance
+    -- and creating an immutable RepaymentReceipt as an audit confirmation.
+    -- -----------------------------------------------------------------------
+    choice SettleRepayment : (ContractId TrancheParticipation, ContractId RepaymentReceipt)
+      with
+        principalPaid : Decimal
+          -- ^ Principal portion of this lender's repayment
+        interestPaid  : Decimal
+          -- ^ Interest portion calculated at marginSpreadBps
+        timestamp     : Text
+          -- ^ ISO-8601 settlement timestamp (e.g. "2026-08-28T00:00:00Z")
+      controller agent
+      do
+        assertMsg
+          "Principal repayment exceeds outstanding drawn balance"
+          (principalPaid <= drawnAmount)
+        assertMsg
+          "Principal and interest must be non-negative"
+          (principalPaid >= 0.0 && interestPaid >= 0.0)
+        updatedTranche <- create this with
+          drawnAmount = drawnAmount - principalPaid
+        receiptCid <- create RepaymentReceipt with
+          facilityId
+          agent
+          lender
+          principalPaid
+          interestPaid
+          timestamp
+        return (updatedTranche, receiptCid)
+
+    -- -----------------------------------------------------------------------
+    -- Choice: SuspendTranche
+    -- Controller: agent
+    --
+    -- Temporarily suspends this lender's tranche (e.g. covenant breach).
+    -- -----------------------------------------------------------------------
+    choice SuspendTranche : ContractId TrancheParticipation
+      controller agent
+      do
+        create this with isActive = False

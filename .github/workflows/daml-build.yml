@@ -1,0 +1,171 @@
+name: CantonSyndex CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # ===========================================================================
+  # Job 1: DAML Build & Test
+  # ===========================================================================
+  daml-build-test:
+    name: DAML Build & Script Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install DAML SDK
+        run: |
+          curl -sSL https://get.daml.com/ | sh -s 2.9.4
+          echo "$HOME/.daml/bin" >> $GITHUB_PATH
+
+      - name: Verify DAML SDK
+        run: daml version
+
+      - name: Build DAML project
+        run: daml build
+        env:
+          DAML_SDK_VERSION: '2.9.4'
+
+      - name: Run DAML Script tests
+        run: daml test --files daml/CantonSyndex/Test.daml
+        timeout-minutes: 10
+
+      - name: Upload DAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CantonSyndex-DAR
+          path: .daml/dist/CantonSyndex-0.1.0.dar
+          retention-days: 30
+
+  # ===========================================================================
+  # Job 2: TypeScript Bridge Build
+  # ===========================================================================
+  ts-bridge-build:
+    name: TypeScript Bridge Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+        env:
+          npm_config_legacy_peer_deps: true
+
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+
+      - name: Build TypeScript bridge
+        run: npm run build
+
+      - name: Upload bridge artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CantonSyndex-Bridge
+          path: dist/
+          retention-days: 30
+
+  # ===========================================================================
+  # Job 3: Frontend Validation
+  # ===========================================================================
+  frontend-validate:
+    name: Frontend HTML/CSS/JS Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate HTML
+        run: |
+          npm install -g html-validate
+          html-validate frontend/index.html
+
+      - name: Check for console.error calls in production code
+        run: |
+          ! grep -r "console\.error" frontend/main.js || echo "Warning: console.error found"
+
+  # ===========================================================================
+  # Job 4: Security Scan
+  # ===========================================================================
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [daml-build-test, ts-bridge-build]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+  # ===========================================================================
+  # Job 5: Release (main branch only)
+  # ===========================================================================
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [daml-build-test, ts-bridge-build, frontend-validate]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download DAR artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: CantonSyndex-DAR
+          path: artifacts/
+
+      - name: Generate release tag
+        id: tag
+        run: echo "tag=v0.1.0-$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "CantonSyndex ${{ steps.tag.outputs.tag }}"
+          body: |
+            ## CantonSyndex — Privacy-Preserving Syndicated Loan Engine
+
+            ### Changes in this release
+            See [ARCHITECTURE.md](docs/ARCHITECTURE.md) and [API_REFERENCE.md](docs/API_REFERENCE.md)
+
+            ### Artifacts
+            - `CantonSyndex-0.1.0.dar` — DAML Archive (deploy to Canton sandbox or LocalNet)
+
+            ### Quick Start
+            ```bash
+            daml sandbox
+            daml script --dar CantonSyndex-0.1.0.dar \
+              --script-name CantonSyndex.Test:testSyndicatedLoanLifecycle \
+              --ledger-host localhost --ledger-port 6865
+            ```
+          files: artifacts/CantonSyndex-0.1.0.dar
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

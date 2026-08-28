@@ -236,3 +236,76 @@ template TrancheParticipation
       controller agent
       do
         create this with isActive = False
+
+-- ---------------------------------------------------------------------------
+-- | DrawdownExecution
+--
+-- An immutable audit record created atomically when the borrower exercises
+-- the RequestDrawdown choice on a MasterFacility. Records the intent and
+-- amount of the drawdown event before pro-rata distribution to tranches.
+--
+-- Once the agent has distributed the drawdown to all participant tranches
+-- via ApplyTrancheDrawdown, the `executed` flag should be archived via
+-- MarkDrawdownExecuted.
+-- ---------------------------------------------------------------------------
+template DrawdownExecution
+  with
+    facilityId : Text
+      -- ^ Reference to the parent MasterFacility
+    drawdownId : Text
+      -- ^ Unique drawdown reference identifier (e.g. "DRAW-001")
+    borrower   : Party
+      -- ^ Borrower who triggered the drawdown
+    agent      : Party
+      -- ^ Lead Agent responsible for distribution
+    amount     : Decimal
+      -- ^ Total drawdown amount requested
+    executed   : Bool
+      -- ^ Whether the agent has distributed to all tranches
+  where
+    signatory borrower, agent
+    ensure amount > 0.0
+
+    -- -----------------------------------------------------------------------
+    -- Choice: MarkDrawdownExecuted
+    -- Controller: agent
+    --
+    -- Marks the drawdown as fully distributed across all participant tranches.
+    -- Creates an immutable archive of the execution event.
+    -- -----------------------------------------------------------------------
+    choice MarkDrawdownExecuted : ContractId DrawdownExecution
+      controller agent
+      do
+        create this with executed = True
+
+-- ---------------------------------------------------------------------------
+-- | RepaymentReceipt
+--
+-- An immutable, lender-specific audit confirmation generated when the agent
+-- processes a repayment via SettleRepayment on a TrancheParticipation.
+--
+-- PRIVACY: Each lender receives ONLY their own receipt. No cross-lender
+--          visibility into other participants' principal or interest amounts.
+-- ---------------------------------------------------------------------------
+template RepaymentReceipt
+  with
+    facilityId    : Text
+      -- ^ Reference to the parent MasterFacility
+    agent         : Party
+      -- ^ Lead Agent who processed the repayment
+    lender        : Party
+      -- ^ Participant lender receiving this settlement confirmation
+    principalPaid : Decimal
+      -- ^ Principal amount repaid to this lender
+    interestPaid  : Decimal
+      -- ^ Interest amount paid at the bilaterally agreed margin spread
+    timestamp     : Text
+      -- ^ ISO-8601 settlement timestamp (e.g. "2026-08-28T12:00:00Z")
+  where
+    signatory agent
+    observer lender
+      -- ^ Lender is a read-only observer — receives the receipt but
+      --   cannot modify it (immutable audit trail)
+    ensure
+      principalPaid >= 0.0 &&
+      interestPaid >= 0.0

@@ -1,0 +1,11 @@
+sdk-version: '2.9.4'
+name: CantonSyndex
+source: daml
+version: 0.1.0
+dependencies:
+  - daml-prim
+  - daml-stdlib
+  - daml-script
+script-service: true
+build-options:
+  - --target=2.dev

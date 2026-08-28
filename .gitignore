@@ -1,0 +1,31 @@
+# DAML build artifacts
+.daml/
+
+# Node / TypeScript
+node_modules/
+dist/
+*.js.map
+*.d.ts
+!src/**/*.d.ts
+
+# Sandbox state
+.daml-sandbox/
+canton.log
+sandbox.log
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Test output
+test-output/
+
+# Coverage
+coverage/
+
+# Env
+.env
+.env.local

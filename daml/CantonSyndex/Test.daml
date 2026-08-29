@@ -381,3 +381,224 @@ testInterestAccrualConventions = script do
     _ -> assertFail "Could not query one or more accrual contracts"
 
   return ()
+
+-- ---------------------------------------------------------------------------
+-- | testCovenantCompliantPath
+--
+-- Validates the happy path: two consecutive quarterly tests both pass.
+-- Verifies that lenders and regulator can see FacilityCovenants (observer).
+-- ---------------------------------------------------------------------------
+testCovenantCompliantPath : Script ()
+testCovenantCompliantPath = script do
+
+  borrower  <- allocatePartyWithHint "BorrowerCorp5"   (PartyIdHint "BORROWER5")
+  agent     <- allocatePartyWithHint "GlobalLeadBank5" (PartyIdHint "AGENT5")
+  bankA     <- allocatePartyWithHint "AlphaBank5"      (PartyIdHint "BANK_A5")
+  bankB     <- allocatePartyWithHint "BetaBank5"       (PartyIdHint "BANK_B5")
+  regulator <- allocatePartyWithHint "CentralBank5"    (PartyIdHint "REGULATOR5")
+
+  -- =========================================================================
+  -- STEP 1: Create FacilityCovenants
+  --   Thresholds: Leverage <= 4.5x, DSCR >= 1.25, LTV <= 75%, Liquidity >= 5M
+  -- =========================================================================
+  covenantCid <- submitMulti [borrower, agent] [] do
+    createCmd FacilityCovenants with
+      facilityId       = "FAC-2026-USD-100M"
+      borrower         = borrower
+      agent            = agent
+      lenders          = [bankA, bankB]
+      regulator        = Some regulator
+      maxLeverageRatio = 4.5
+      minDSCR          = 1.25
+      maxLTV           = 0.75
+      minLiquidity     = 5_000_000.0
+      lastTestDate     = date 2026 Jan 1
+      leverageActual   = 3.2
+      dscrActual       = 1.8
+      ltvActual        = 0.55
+      liquidityActual  = 8_000_000.0
+      breachStatus     = Compliant
+      curePeriodDays   = 30
+
+  -- =========================================================================
+  -- STEP 2: Q1 covenant test — borrower within all thresholds
+  -- =========================================================================
+  q1Cid <- submit agent do
+    exerciseCmd covenantCid TestCovenant with
+      testDate     = date 2026 Apr 1
+      newLeverage  = 3.8   -- ≤ 4.5 ✓
+      newDSCR      = 1.45  -- ≥ 1.25 ✓
+      newLTV       = 0.62  -- ≤ 0.75 ✓
+      newLiquidity = 7_200_000.0  -- ≥ 5M ✓
+
+  q1State <- queryContractId agent q1Cid
+  case q1State of
+    None    -> assertFail "Q1 covenant contract not found"
+    Some cov -> assertMsg "Q1 should be Compliant" (cov.breachStatus == Compliant)
+
+  -- =========================================================================
+  -- STEP 3: Verify all observers can see the covenant contract
+  -- =========================================================================
+  bankAView <- queryContractId bankA q1Cid
+  assertMsg "AlphaBank should see covenant contract as observer"
+    (bankAView /= None)
+
+  regulatorView <- queryContractId regulator q1Cid
+  assertMsg "Regulator should see covenant contract as observer"
+    (regulatorView /= None)
+
+  -- =========================================================================
+  -- STEP 4: Q2 covenant test — still compliant
+  -- =========================================================================
+  q2Cid <- submit agent do
+    exerciseCmd q1Cid TestCovenant with
+      testDate     = date 2026 Jul 1
+      newLeverage  = 4.1   -- ≤ 4.5 ✓ (tightening but still OK)
+      newDSCR      = 1.30  -- ≥ 1.25 ✓ (narrowing margin)
+      newLTV       = 0.70  -- ≤ 0.75 ✓
+      newLiquidity = 5_500_000.0  -- ≥ 5M ✓
+
+  q2State <- queryContractId agent q2Cid
+  case q2State of
+    None    -> assertFail "Q2 covenant contract not found"
+    Some cov -> assertMsg "Q2 should still be Compliant" (cov.breachStatus == Compliant)
+
+  return ()
+
+-- ---------------------------------------------------------------------------
+-- | testCovenantBreachAndEnforcement
+--
+-- Validates the full breach → waiver → re-breach → acceleration workflow:
+--   Q3: Leverage ratio breaches 4.5x threshold → status = Breached
+--   Agent issues waiver with reason → status = WaivedByAgent
+--   Q4: Leverage breaches again AND DSCR below minimum → Breached again
+--   Agent accelerates → CovenantBreachNotice created
+-- ---------------------------------------------------------------------------
+testCovenantBreachAndEnforcement : Script ()
+testCovenantBreachAndEnforcement = script do
+
+  borrower  <- allocatePartyWithHint "BorrowerCorp6"   (PartyIdHint "BORROWER6")
+  agent     <- allocatePartyWithHint "GlobalLeadBank6" (PartyIdHint "AGENT6")
+  bankA     <- allocatePartyWithHint "AlphaBank6"      (PartyIdHint "BANK_A6")
+  bankB     <- allocatePartyWithHint "BetaBank6"       (PartyIdHint "BANK_B6")
+  regulator <- allocatePartyWithHint "CentralBank6"    (PartyIdHint "REGULATOR6")
+
+  -- Setup: initial compliant covenants
+  initCid <- submitMulti [borrower, agent] [] do
+    createCmd FacilityCovenants with
+      facilityId       = "FAC-2026-USD-100M"
+      borrower         = borrower
+      agent            = agent
+      lenders          = [bankA, bankB]
+      regulator        = Some regulator
+      maxLeverageRatio = 4.5
+      minDSCR          = 1.25
+      maxLTV           = 0.75
+      minLiquidity     = 5_000_000.0
+      lastTestDate     = date 2026 Jun 30
+      leverageActual   = 4.0
+      dscrActual       = 1.40
+      ltvActual        = 0.65
+      liquidityActual  = 6_000_000.0
+      breachStatus     = Compliant
+      curePeriodDays   = 30
+
+  -- =========================================================================
+  -- Q3: Breach — leverage = 4.8x > 4.5x max
+  -- =========================================================================
+  q3Cid <- submit agent do
+    exerciseCmd initCid TestCovenant with
+      testDate     = date 2026 Oct 1
+      newLeverage  = 4.8   -- > 4.5 ✗ BREACH
+      newDSCR      = 1.30  -- ≥ 1.25 ✓
+      newLTV       = 0.68  -- ≤ 0.75 ✓
+      newLiquidity = 5_800_000.0  -- ≥ 5M ✓
+
+  q3State <- queryContractId agent q3Cid
+  case q3State of
+    None    -> assertFail "Q3 covenant not found"
+    Some cov -> assertMsg "Q3 leverage breach should set status to Breached"
+                  (cov.breachStatus == Breached)
+
+  -- =========================================================================
+  -- Agent waives the Q3 breach (borrower provides cure plan)
+  -- =========================================================================
+  waivedCid <- submit agent do
+    exerciseCmd q3Cid WaiveCovenantBreach with
+      waiverReason = "Q3 leverage breach waived. Borrower provided 90-day \
+                     \deleveraging plan; divestiture of non-core assets underway."
+
+  waivedState <- queryContractId agent waivedCid
+  case waivedState of
+    None    -> assertFail "Waived covenant not found"
+    Some cov -> assertMsg "Status should be WaivedByAgent" (cov.breachStatus == WaivedByAgent)
+
+  -- Verify waiver guard: cannot waive a non-breached contract
+  waiverOfWaived <- tryToEither $ submit agent do
+    exerciseCmd waivedCid WaiveCovenantBreach with
+      waiverReason = "Double waiver attempt"
+  case waiverOfWaived of
+    Left  _ -> return ()  -- Expected: guard rejects non-Breached status
+    Right _ -> assertFail "WaiveCovenantBreach should reject non-Breached status"
+
+  -- =========================================================================
+  -- Q4: Re-breach — leverage AND DSCR both fail
+  -- =========================================================================
+  q4Cid <- submit agent do
+    exerciseCmd waivedCid TestCovenant with
+      testDate     = date 2027 Jan 1
+      newLeverage  = 5.2   -- > 4.5 ✗ BREACH
+      newDSCR      = 1.10  -- < 1.25 ✗ BREACH
+      newLTV       = 0.72  -- ≤ 0.75 ✓
+      newLiquidity = 5_100_000.0  -- ≥ 5M ✓
+
+  q4State <- queryContractId agent q4Cid
+  case q4State of
+    None    -> assertFail "Q4 covenant not found"
+    Some cov -> assertMsg "Q4 double-breach should be Breached" (cov.breachStatus == Breached)
+
+  -- =========================================================================
+  -- Agent accelerates — creates immutable CovenantBreachNotice
+  -- =========================================================================
+  noticeCid <- submit agent do
+    exerciseCmd q4Cid AccelerateOnBreach with
+      accelerationDate = date 2027 Jan 15
+      noticeText       = "NOTICE OF ACCELERATION: Pursuant to Section 8.1 of \
+                         \the Credit Agreement dated 2026-08-01, the Agent \
+                         \hereby declares the outstanding principal and accrued \
+                         \interest immediately due and payable. Leverage ratio \
+                         \5.2x exceeded maximum 4.5x and DSCR 1.10x below \
+                         \minimum 1.25x as at Q4 2026 test date."
+
+  -- =========================================================================
+  -- Verify CovenantBreachNotice visibility — all parties see it
+  -- =========================================================================
+  borrowerView  <- queryContractId borrower noticeCid
+  bankAView     <- queryContractId bankA noticeCid
+  bankBView     <- queryContractId bankB noticeCid
+  regulatorView <- queryContractId regulator noticeCid
+
+  assertMsg "Borrower must see CovenantBreachNotice" (borrowerView /= None)
+  assertMsg "AlphaBank must see CovenantBreachNotice" (bankAView /= None)
+  assertMsg "BetaBank must see CovenantBreachNotice"  (bankBView /= None)
+  assertMsg "Regulator must see CovenantBreachNotice" (regulatorView /= None)
+
+  -- Verify breach ratios are captured correctly on the notice
+  case bankAView of
+    None -> assertFail "BankA cannot see notice"
+    Some notice -> do
+      assertMsg "Notice leverage should match Q4 actual" (notice.leverageAtBreach == 5.2)
+      assertMsg "Notice DSCR should match Q4 actual"     (notice.dscrAtBreach == 1.10)
+
+  -- =========================================================================
+  -- Guard: cannot accelerate already-archived FacilityCovenants
+  -- =========================================================================
+  doubleAccel <- tryToEither $ submit agent do
+    exerciseCmd q4Cid AccelerateOnBreach with
+      accelerationDate = date 2027 Jan 16
+      noticeText = "Second acceleration attempt"
+  case doubleAccel of
+    Left  _ -> return ()  -- Expected: q4Cid is archived
+    Right _ -> assertFail "Cannot accelerate an already-archived covenant contract"
+
+  return ()

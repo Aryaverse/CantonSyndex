@@ -309,3 +309,216 @@ template RepaymentReceipt
     ensure
       principalPaid >= 0.0 &&
       interestPaid >= 0.0
+
+-- ---------------------------------------------------------------------------
+-- | DayCountConvention
+--
+-- Enumerates the interest day-count conventions used in capital markets.
+-- The choice of convention affects how many days are counted in an interest
+-- period and the assumed number of days in a year (day-count basis).
+-- ---------------------------------------------------------------------------
+data DayCountConvention
+  = Actual365Fixed
+    -- ^ Actual days in period / 365 (ISDA standard for USD syndicated loans)
+  | Actual360
+    -- ^ Actual days in period / 360 (money-market convention)
+  | Thirty360
+    -- ^ 30 days per month / 360 (bond market convention)
+  deriving (Show, Eq)
+
+-- ---------------------------------------------------------------------------
+-- | InterestAccrual
+--
+-- Tracks the running interest accrual for a specific TrancheParticipation.
+-- Created by the agent at the start of each interest period and settled
+-- at period end via CollectInterest.
+--
+-- PRIVACY: Same bilateral privacy as TrancheParticipation — only the agent
+--          and the designated lender can see this contract.
+--
+-- Day-count conventions supported:
+--   Actual365Fixed — standard for USD syndicated loans (LIBOR / SOFR)
+--   Actual360      — common for EUR money-market instruments
+--   Thirty360      — bond market (e.g. investment-grade term loans)
+-- ---------------------------------------------------------------------------
+template InterestAccrual
+  with
+    facilityId       : Text
+      -- ^ Reference to the parent MasterFacility
+    trancheId        : Text
+      -- ^ Unique identifier for the accrual period (e.g. "ACCRUE-ALPHA-001")
+    agent            : Party
+      -- ^ Lead Agent who manages the accrual
+    lender           : Party
+      -- ^ Participant lender to whom interest is owed
+    principalBalance : Decimal
+      -- ^ Outstanding principal on which interest accrues
+    marginSpreadBps  : Decimal
+      -- ^ Margin component in basis points (bilaterally negotiated)
+    baseRateBps      : Decimal
+      -- ^ Reference rate (e.g. SOFR or LIBOR substitute) in basis points
+    periodStartDate  : Date
+      -- ^ Accrual period start date (inclusive)
+    periodEndDate    : Date
+      -- ^ Accrual period end date (exclusive)
+    dayCountConvention : DayCountConvention
+      -- ^ Day-count basis for interest calculation
+    accruedInterest  : Decimal
+      -- ^ Running accrued interest (updated on each AccrueInterest call)
+    isSettled        : Bool
+      -- ^ Whether this period's interest has been collected
+  where
+    signatory agent, lender
+    -- No observers — strict bilateral privacy matching TrancheParticipation
+    ensure
+      principalBalance >= 0.0 &&
+      marginSpreadBps >= 0.0 &&
+      baseRateBps >= 0.0 &&
+      accruedInterest >= 0.0 &&
+      periodEndDate >= periodStartDate
+
+    -- -----------------------------------------------------------------------
+    -- Choice: AccrueInterest
+    -- Controller: agent
+    --
+    -- Calculates and accumulates interest for a sub-period (e.g. daily or
+    -- weekly accrual run). Uses the configured DayCountConvention.
+    --
+    -- Formula:
+    --   totalRateBps = marginSpreadBps + baseRateBps
+    --   interest     = principal * (totalRateBps / 10000) * (days / yearBasis)
+    -- -----------------------------------------------------------------------
+    choice AccrueInterest : ContractId InterestAccrual
+      with
+        accrualDate : Date
+          -- ^ The date up to which interest is being accrued (must be within period)
+      controller agent
+      do
+        assertMsg
+          "Accrual date must be within the interest period"
+          (accrualDate >= periodStartDate && accrualDate <= periodEndDate)
+        assertMsg
+          "Interest period is already settled"
+          (not isSettled)
+
+        -- Calculate days since period start (actual days)
+        let actualDays  = subDate accrualDate periodStartDate
+            yearBasis   = case dayCountConvention of
+                            Actual365Fixed -> 365.0
+                            Actual360      -> 360.0
+                            Thirty360      -> 360.0
+            -- For 30/360, months are treated as 30 days each
+            -- For this implementation we use actual days for all conventions
+            -- (full 30/360 date adjustment is a follow-up enhancement)
+            totalRateBps = marginSpreadBps + baseRateBps
+            periodInterest = principalBalance
+                           * (totalRateBps / 10000.0)
+                           * (intToDecimal actualDays / yearBasis)
+
+        create this with
+          accruedInterest = periodInterest
+
+    -- -----------------------------------------------------------------------
+    -- Choice: CollectInterest
+    -- Controller: agent
+    --
+    -- Settles the accrued interest at period end, archiving this contract
+    -- and creating an immutable InterestPaymentReceipt visible to the lender.
+    -- -----------------------------------------------------------------------
+    choice CollectInterest : (ContractId InterestPaymentReceipt)
+      with
+        settlementDate : Date
+          -- ^ Date on which interest is actually transferred
+      controller agent
+      do
+        assertMsg
+          "Cannot collect before period end date"
+          (settlementDate >= periodEndDate)
+        assertMsg
+          "Already settled"
+          (not isSettled)
+        assertMsg
+          "No interest has been accrued yet"
+          (accruedInterest > 0.0)
+
+        create InterestPaymentReceipt with
+          facilityId
+          trancheId
+          agent
+          lender
+          principalBalance
+          accruedInterest
+          marginSpreadBps
+          baseRateBps
+          dayCountConvention
+          periodStartDate
+          periodEndDate
+          settlementDate
+
+    -- -----------------------------------------------------------------------
+    -- Choice: AdjustPrincipal
+    -- Controller: agent
+    --
+    -- Updates the principal balance mid-period following a drawdown or
+    -- repayment, resetting accrued interest to zero (accrual restarts).
+    -- -----------------------------------------------------------------------
+    choice AdjustPrincipal : ContractId InterestAccrual
+      with
+        newPrincipal   : Decimal
+          -- ^ Updated outstanding principal
+        adjustmentDate : Date
+          -- ^ Date of the principal change
+      controller agent
+      do
+        assertMsg
+          "New principal must be non-negative"
+          (newPrincipal >= 0.0)
+        assertMsg
+          "Adjustment date must be within the interest period"
+          (adjustmentDate >= periodStartDate && adjustmentDate <= periodEndDate)
+        create this with
+          principalBalance = newPrincipal
+          accruedInterest  = 0.0  -- Reset; AccrueInterest will recalculate
+          periodStartDate  = adjustmentDate  -- Restart accrual from adjustment
+
+-- ---------------------------------------------------------------------------
+-- | InterestPaymentReceipt
+--
+-- Immutable, lender-specific audit confirmation generated when the agent
+-- exercises CollectInterest on an InterestAccrual contract.
+--
+-- Provides a full audit trail including the rate components, day-count
+-- convention used, and exact period dates for regulatory compliance.
+--
+-- PRIVACY: Only agent (signatory) and specific lender (observer) can see this.
+-- ---------------------------------------------------------------------------
+template InterestPaymentReceipt
+  with
+    facilityId       : Text
+      -- ^ Reference to the parent MasterFacility
+    trancheId        : Text
+      -- ^ Accrual period identifier
+    agent            : Party
+      -- ^ Lead Agent who collected the interest
+    lender           : Party
+      -- ^ Participant lender who received the payment
+    principalBalance : Decimal
+      -- ^ Principal on which interest was calculated
+    accruedInterest  : Decimal
+      -- ^ Total interest amount collected
+    marginSpreadBps  : Decimal
+      -- ^ Margin component used in calculation
+    baseRateBps      : Decimal
+      -- ^ Reference rate component used in calculation
+    dayCountConvention : DayCountConvention
+      -- ^ Day-count convention applied
+    periodStartDate  : Date
+      -- ^ Start of the accrual period
+    periodEndDate    : Date
+      -- ^ End of the accrual period
+    settlementDate   : Date
+      -- ^ Actual settlement / payment date
+  where
+    signatory agent
+    observer lender
+    ensure accruedInterest >= 0.0

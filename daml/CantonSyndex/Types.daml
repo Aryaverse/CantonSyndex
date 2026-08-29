@@ -52,3 +52,35 @@ calculateProRataShare lenderCommitment totalCommitment totalAmount =
   if totalCommitment == 0.0
     then 0.0
     else (lenderCommitment / totalCommitment) * totalAmount
+
+-- | Interest accrual summary for reporting
+data InterestAccrualSummary = InterestAccrualSummary
+  with
+    trancheId        : Text
+      -- ^ Accrual period identifier
+    principalBalance : Decimal
+      -- ^ Outstanding principal
+    accruedInterest  : Decimal
+      -- ^ Current accrued interest amount
+    totalRateBps     : Decimal
+      -- ^ All-in rate = margin + base rate in basis points
+    daysElapsed      : Int
+      -- ^ Number of days accrued so far in the period
+  deriving (Show, Eq)
+
+-- | Compute the year basis for a given day-count convention
+--   (used independently of DAML templates, e.g. in off-chain calculations)
+yearBasisFor : Text -> Decimal
+yearBasisFor convention
+  | convention == "Actual365Fixed" = 365.0
+  | convention == "Actual360"      = 360.0
+  | convention == "Thirty360"      = 360.0
+  | otherwise                      = 365.0  -- Default to Actual/365
+
+-- | All-in rate from margin + base rate components
+allInRateBps : Decimal -> Decimal -> Decimal
+allInRateBps marginBps baseRateBps = marginBps + baseRateBps
+
+-- | Annualized interest rate as a percentage string (for display)
+bpsToPercent : Decimal -> Decimal
+bpsToPercent bps = bps / 100.0

@@ -752,3 +752,174 @@ template CovenantBreachNotice
     signatory agent
     observer [borrower] ++ lenders ++ (optionalToList regulator)
     ensure noticeText /= ""
+
+-- ---------------------------------------------------------------------------
+-- | CommitmentFeeAccrual
+--
+-- Models the lender's right to earn a commitment fee on the undrawn portion
+-- of their tranche commitment. This is standard in syndicated loan agreements
+-- and compensates lenders for holding capacity available to the borrower.
+--
+-- Fee formula (Actual/365):
+--   undrawnAmount = commitmentAmount - drawnAmount
+--   feeAmount     = undrawnAmount * (feeBps / 10000) * (days / 365)
+--
+-- PRIVACY: Strict bilateral — only agent and the specific lender are
+--          signatories. No other lender can see this contract, ensuring
+--          each bank's undrawn balance and negotiated fee rate remain private.
+--
+-- Lifecycle:
+--   1. Agent creates CommitmentFeeAccrual at period start
+--   2. Agent calls AccrueCommitmentFee periodically (daily/weekly)
+--   3. At period end, agent calls CollectCommitmentFee → CommitmentFeeReceipt
+--   4. If drawdown occurs mid-period, agent calls AdjustDrawnAmount
+-- ---------------------------------------------------------------------------
+template CommitmentFeeAccrual
+  with
+    facilityId        : Text
+      -- ^ Reference to the parent MasterFacility
+    trancheId         : Text
+      -- ^ Unique ID for this fee accrual period (e.g. "FEE-ALPHA-Q3-2026")
+    agent             : Party
+      -- ^ Lead Agent managing fee collection
+    lender            : Party
+      -- ^ Participant lender earning the commitment fee
+    commitmentAmount  : Decimal
+      -- ^ Total lender commitment (denominator for undrawn calc)
+    drawnAmount       : Decimal
+      -- ^ Currently drawn portion (updated on each drawdown/repayment)
+    feeBps            : Decimal
+      -- ^ Commitment fee rate in basis points (e.g. 50.0 = 0.50% pa)
+    periodStartDate   : Date
+      -- ^ Start of the fee accrual period
+    periodEndDate     : Date
+      -- ^ End of the fee accrual period
+    accruedFee        : Decimal
+      -- ^ Running accrued commitment fee amount
+    isSettled         : Bool
+      -- ^ Whether this period's fee has been collected
+
+  where
+    signatory agent, lender
+    ensure
+      commitmentAmount > 0.0 &&
+      drawnAmount >= 0.0 &&
+      drawnAmount <= commitmentAmount &&
+      feeBps >= 0.0 &&
+      accruedFee >= 0.0 &&
+      periodEndDate >= periodStartDate
+
+    -- -----------------------------------------------------------------------
+    -- Choice: AccrueCommitmentFee
+    -- Controller: agent
+    --
+    -- Calculates and accumulates the commitment fee for actual days elapsed.
+    -- Only accrues on the UNDRAWN portion — drawn amounts earn interest
+    -- via InterestAccrual (no double-counting).
+    --
+    -- Formula (Actual/365):
+    --   undrawn  = commitmentAmount - drawnAmount
+    --   fee      = undrawn * (feeBps / 10000) * (days / 365)
+    -- -----------------------------------------------------------------------
+    choice AccrueCommitmentFee : ContractId CommitmentFeeAccrual
+      with
+        accrualDate : Date
+          -- ^ Date up to which the fee is being accrued
+      controller agent
+      do
+        assertMsg "Accrual date must be within the fee period"
+          (accrualDate >= periodStartDate && accrualDate <= periodEndDate)
+        assertMsg "Fee period is already settled" (not isSettled)
+
+        let undrawnAmount = commitmentAmount - drawnAmount
+            actualDays    = subDate accrualDate periodStartDate
+            periodFee     = undrawnAmount
+                          * (feeBps / 10000.0)
+                          * (intToDecimal actualDays / 365.0)
+
+        create this with accruedFee = periodFee
+
+    -- -----------------------------------------------------------------------
+    -- Choice: AdjustDrawnAmount
+    -- Controller: agent
+    --
+    -- Updates the drawn balance mid-period following a drawdown or repayment.
+    -- Resets accruedFee to zero (fee engine recalculates from adjustment date).
+    -- -----------------------------------------------------------------------
+    choice AdjustDrawnAmount : ContractId CommitmentFeeAccrual
+      with
+        newDrawnAmount : Decimal
+          -- ^ Updated drawn balance
+        adjustmentDate : Date
+          -- ^ Date of the drawdown or repayment
+      controller agent
+      do
+        assertMsg "New drawn amount must be non-negative" (newDrawnAmount >= 0.0)
+        assertMsg "New drawn amount cannot exceed commitment"
+          (newDrawnAmount <= commitmentAmount)
+        assertMsg "Adjustment date must be within fee period"
+          (adjustmentDate >= periodStartDate && adjustmentDate <= periodEndDate)
+
+        create this with
+          drawnAmount    = newDrawnAmount
+          accruedFee     = 0.0
+          periodStartDate = adjustmentDate  -- Restart accrual from adjustment
+
+    -- -----------------------------------------------------------------------
+    -- Choice: CollectCommitmentFee
+    -- Controller: agent
+    --
+    -- Settles the accrued commitment fee at period end. Archives this
+    -- contract and creates an immutable CommitmentFeeReceipt.
+    -- -----------------------------------------------------------------------
+    choice CollectCommitmentFee : ContractId CommitmentFeeReceipt
+      with
+        settlementDate : Date
+          -- ^ Date on which fee is transferred
+      controller agent
+      do
+        assertMsg "Cannot collect before period end"
+          (settlementDate >= periodEndDate)
+        assertMsg "Already settled" (not isSettled)
+        assertMsg "No fee has been accrued" (accruedFee > 0.0)
+
+        create CommitmentFeeReceipt with
+          facilityId
+          trancheId
+          agent
+          lender
+          commitmentAmount
+          averageUndrawnAmount = commitmentAmount - drawnAmount
+          feeBps
+          accruedFee
+          periodStartDate
+          periodEndDate
+          settlementDate
+
+-- ---------------------------------------------------------------------------
+-- | CommitmentFeeReceipt
+--
+-- Immutable record of a commitment fee payment. Provides a full audit trail
+-- including the undrawn balance basis and the fee rate applied.
+--
+-- PRIVACY: Agent is signatory; lender is observer (read-only confirmation).
+-- ---------------------------------------------------------------------------
+template CommitmentFeeReceipt
+  with
+    facilityId          : Text
+    trancheId           : Text
+    agent               : Party
+    lender              : Party
+    commitmentAmount    : Decimal
+    averageUndrawnAmount : Decimal
+      -- ^ Undrawn balance at settlement (simplified — full implementation
+      --   would use time-weighted average undrawn across the period)
+    feeBps              : Decimal
+    accruedFee          : Decimal
+    periodStartDate     : Date
+    periodEndDate       : Date
+    settlementDate      : Date
+  where
+    signatory agent
+    observer lender
+    ensure accruedFee >= 0.0 && feeBps >= 0.0

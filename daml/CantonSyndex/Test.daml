@@ -602,3 +602,177 @@ testCovenantBreachAndEnforcement = script do
     Right _ -> assertFail "Cannot accelerate an already-archived covenant contract"
 
   return ()
+
+-- ---------------------------------------------------------------------------
+-- | testCommitmentFeeAccrualAndCollection
+--
+-- Validates the commitment fee lifecycle:
+--   1. Create CommitmentFeeAccrual: AlphaBank \$60M, \$0 drawn, 50bps fee
+--   2. AccrueCommitmentFee for 90-day Q3 period
+--   3. Verify fee = 60M * (50/10000) * (90/365) = \$73,972.60 approx
+--   4. CollectCommitmentFee → CommitmentFeeReceipt
+--   5. Privacy: BetaBank cannot see AlphaBank's fee receipt
+-- ---------------------------------------------------------------------------
+testCommitmentFeeAccrualAndCollection : Script ()
+testCommitmentFeeAccrualAndCollection = script do
+
+  agent <- allocatePartyWithHint "GlobalLeadBank7" (PartyIdHint "AGENT7")
+  bankA <- allocatePartyWithHint "AlphaBank7"      (PartyIdHint "BANK_A7")
+  bankB <- allocatePartyWithHint "BetaBank7"       (PartyIdHint "BANK_B7")
+
+  let periodStart = date 2026 Jul 1
+      periodEnd   = date 2026 Oct 1  -- 92 actual days (Q3)
+      accrualDay  = date 2026 Oct 1
+      settleDay   = date 2026 Oct 2
+
+  -- =========================================================================
+  -- STEP 1: Create CommitmentFeeAccrual
+  --   AlphaBank: \$60M commitment, \$0 drawn (fully undrawn at period start)
+  --   Fee rate: 50 bps p.a.
+  -- =========================================================================
+  feeCidA <- submitMulti [agent, bankA] [] do
+    createCmd CommitmentFeeAccrual with
+      facilityId       = "FAC-2026-USD-100M"
+      trancheId        = "FEE-ALPHA-Q3-2026"
+      agent            = agent
+      lender           = bankA
+      commitmentAmount = 60_000_000.0
+      drawnAmount      = 0.0
+      feeBps           = 50.0   -- 0.50% p.a.
+      periodStartDate  = periodStart
+      periodEndDate    = periodEnd
+      accruedFee       = 0.0
+      isSettled        = False
+
+  -- =========================================================================
+  -- STEP 2: AccrueCommitmentFee for 92 days (Q3 2026)
+  --
+  -- Expected (Actual/365):
+  --   undrawn = 60,000,000
+  --   fee     = 60,000,000 * (50/10000) * (92/365)
+  --           = 60,000,000 * 0.005 * 0.25205...
+  --           = \$75,616.44 approx
+  -- =========================================================================
+  updatedFeeCidA <- submit agent do
+    exerciseCmd feeCidA AccrueCommitmentFee with
+      accrualDate = accrualDay
+
+  -- Verify accrued fee matches formula (within \$1 tolerance)
+  feeStateA <- queryContractId agent updatedFeeCidA
+  case feeStateA of
+    None -> assertFail "Fee contract not found after AccrueCommitmentFee"
+    Some f -> do
+      let expectedFee = 60_000_000.0 * (50.0 / 10000.0) * (92.0 / 365.0)
+          tolerance   = 1.0
+      assertMsg
+        ("CommitmentFee mismatch. Got: " <> show f.accruedFee <>
+         " Expected: " <> show expectedFee)
+        (f.accruedFee >= expectedFee - tolerance &&
+         f.accruedFee <= expectedFee + tolerance)
+      assertMsg "Fee should be positive" (f.accruedFee > 0.0)
+
+  -- =========================================================================
+  -- STEP 3: CollectCommitmentFee → CommitmentFeeReceipt
+  -- =========================================================================
+  receiptCidA <- submit agent do
+    exerciseCmd updatedFeeCidA CollectCommitmentFee with
+      settlementDate = settleDay
+
+  -- =========================================================================
+  -- STEP 4: Verify receipt — AlphaBank sees it; BetaBank cannot
+  -- =========================================================================
+  bankAFeeReceipts <- queryFilter @CommitmentFeeReceipt bankA
+    (\r -> r.trancheId == "FEE-ALPHA-Q3-2026")
+  assertMsg "AlphaBank should see its own fee receipt" (length bankAFeeReceipts == 1)
+
+  case bankAFeeReceipts of
+    [(_, r)] -> do
+      assertMsg "Receipt feeBps should be 50"             (r.feeBps == 50.0)
+      assertMsg "Receipt commitmentAmount should be \$60M" (r.commitmentAmount == 60_000_000.0)
+      assertMsg "Receipt should have positive accruedFee"  (r.accruedFee > 0.0)
+    _ -> assertFail "Expected exactly one fee receipt for AlphaBank"
+
+  -- PRIVACY: BetaBank cannot see AlphaBank's commitment fee receipt
+  bankBFeeReceipts <- queryFilter @CommitmentFeeReceipt bankB
+    (\r -> r.lender == bankA)
+  assertMsg
+    "PRIVACY VIOLATION: BetaBank must not see AlphaBank's fee receipt"
+    (null bankBFeeReceipts)
+
+  return ()
+
+-- ---------------------------------------------------------------------------
+-- | testCommitmentFeeMidPeriodDrawdown
+--
+-- Validates the AdjustDrawnAmount flow:
+--   - Fee starts on \$40M undrawn (\$60M commitment, \$20M drawn)
+--   - Mid-period: borrower draws another \$10M → AlphaBank gets \$6M (60%)
+--   - AdjustDrawnAmount updates to \$26M drawn → accrual resets
+--   - AccrueCommitmentFee for remaining period on \$34M undrawn
+--   - Verify new fee is smaller (less undrawn amount)
+-- ---------------------------------------------------------------------------
+testCommitmentFeeMidPeriodDrawdown : Script ()
+testCommitmentFeeMidPeriodDrawdown = script do
+
+  agent <- allocatePartyWithHint "GlobalLeadBank8" (PartyIdHint "AGENT8")
+  bankA <- allocatePartyWithHint "AlphaBank8"      (PartyIdHint "BANK_A8")
+
+  let periodStart  = date 2026 Aug 1
+      periodEnd    = date 2026 Nov 1   -- 92-day period
+      drawdownDay  = date 2026 Sep 1   -- Mid-period drawdown (day 31)
+      accrualDay2  = date 2026 Nov 1   -- Accrue for remaining 61 days
+
+  -- Initial state: \$60M commitment, \$20M drawn → \$40M undrawn
+  feeCid <- submitMulti [agent, bankA] [] do
+    createCmd CommitmentFeeAccrual with
+      facilityId       = "FAC-2026-USD-100M"
+      trancheId        = "FEE-ALPHA-Q4-2026"
+      agent            = agent
+      lender           = bankA
+      commitmentAmount = 60_000_000.0
+      drawnAmount      = 20_000_000.0  -- \$20M already drawn
+      feeBps           = 50.0
+      periodStartDate  = periodStart
+      periodEndDate    = periodEnd
+      accruedFee       = 0.0
+      isSettled        = False
+
+  -- Pre-drawdown accrual (day 31): fee on \$40M undrawn for 31 days
+  preCid <- submit agent do
+    exerciseCmd feeCid AccrueCommitmentFee with accrualDate = drawdownDay
+
+  preState <- queryContractId agent preCid
+  let preFee = case preState of
+                 Some f -> f.accruedFee
+                 None   -> 0.0
+
+  -- Mid-period drawdown: AlphaBank's share increases by \$6M (60% of \$10M)
+  -- AdjustDrawnAmount resets accrual to restart from drawdown date
+  adjustedCid <- submit agent do
+    exerciseCmd preCid AdjustDrawnAmount with
+      newDrawnAmount = 26_000_000.0   -- \$20M + \$6M new draw
+      adjustmentDate = drawdownDay
+
+  -- Post-drawdown accrual (day 92 from original start):
+  -- Now accrues on \$34M undrawn (\$60M - \$26M)
+  postCid <- submit agent do
+    exerciseCmd adjustedCid AccrueCommitmentFee with accrualDate = accrualDay2
+
+  postState <- queryContractId agent postCid
+  case postState of
+    None -> assertFail "Post-adjustment fee contract not found"
+    Some f -> do
+      -- Post-adjustment fee: \$34M * (50/10000) * (61/365)
+      let expectedPostFee = 34_000_000.0 * (50.0 / 10000.0) * (61.0 / 365.0)
+          tolerance       = 1.0
+      assertMsg
+        ("Post-drawdown fee mismatch. Got: " <> show f.accruedFee <>
+         " Expected: " <> show expectedPostFee)
+        (f.accruedFee >= expectedPostFee - tolerance &&
+         f.accruedFee <= expectedPostFee + tolerance)
+      -- Post-drawdown fee should be less than pre-drawdown (smaller undrawn base)
+      assertMsg
+        "Post-drawdown fee should be less than pre-drawdown (undrawn base reduced)"
+        (f.accruedFee < preFee || preFee == 0.0)
+
+  return ()

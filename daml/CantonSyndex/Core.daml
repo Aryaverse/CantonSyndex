@@ -522,3 +522,233 @@ template InterestPaymentReceipt
     signatory agent
     observer lender
     ensure accruedInterest >= 0.0
+
+-- ---------------------------------------------------------------------------
+-- | CovenantType
+--
+-- Enumerates the financial ratio covenants common in leveraged loan facilities.
+-- Each covenant imposes a threshold on the borrower's financial health that,
+-- if breached, gives lenders certain enforcement rights.
+-- ---------------------------------------------------------------------------
+data CovenantType
+  = LeverageRatio
+    -- ^ Total Net Debt / EBITDA. Typically set as a maximum (e.g. <= 4.5x).
+    --   A higher ratio means more debt relative to earnings — a breach signals
+    --   deteriorating credit quality.
+  | DebtServiceCoverageRatio
+    -- ^ EBITDA / (Interest + Principal). Minimum threshold (e.g. >= 1.25x).
+    --   Measures borrower's ability to service debt from operating cash flow.
+  | LoanToValue
+    -- ^ Outstanding Loan / Appraised Asset Value. Max threshold (e.g. <= 75%).
+    --   Used primarily in real estate and asset-backed lending.
+  | MinimumLiquidity
+    -- ^ Cash + undrawn revolver / monthly burn. Minimum threshold.
+    --   Protects lenders against liquidity-driven defaults.
+  | MaxCapex
+    -- ^ Annual capital expenditure as % of EBITDA. Maximum threshold.
+    --   Prevents the borrower from over-investing during the loan term.
+  deriving (Show, Eq)
+
+-- ---------------------------------------------------------------------------
+-- | CovenantBreachStatus
+--
+-- Represents the compliance status of a covenant at a given test date.
+-- ---------------------------------------------------------------------------
+data CovenantBreachStatus
+  = Compliant
+    -- ^ Borrower is within the covenant threshold
+  | Breached
+    -- ^ Borrower has breached the threshold — cure period may apply
+  | WaivedByAgent
+    -- ^ Agent has waived the breach (requires lender consent in practice)
+  | Accelerated
+    -- ^ Loan has been accelerated following an uncured breach
+  deriving (Show, Eq)
+
+-- ---------------------------------------------------------------------------
+-- | FacilityCovenants
+--
+-- Defines the financial maintenance covenants attached to a MasterFacility.
+-- The regulator and all lenders are observers, enabling transparency while
+-- keeping the specific threshold values bilaterally visible.
+--
+-- PRIVACY: Borrower + Agent are signatories. Regulator + all participant
+--          lenders are observers (covenant status is shared information).
+--
+-- Testing frequency: Typically quarterly (every 90 days), aligned with
+-- the borrower's financial reporting cycle.
+-- ---------------------------------------------------------------------------
+template FacilityCovenants
+  with
+    facilityId        : Text
+      -- ^ Reference to the parent MasterFacility
+    borrower          : Party
+      -- ^ Corporate borrower whose ratios are being monitored
+    agent             : Party
+      -- ^ Lead Agent responsible for testing and enforcement
+    lenders           : [Party]
+      -- ^ All participant lenders — observers on covenant status
+    regulator         : Optional Party
+      -- ^ Regulatory observer (sees compliance status only)
+
+    -- Covenant thresholds
+    maxLeverageRatio  : Decimal
+      -- ^ Maximum Net Debt / EBITDA (e.g. 4.5 for 4.5x)
+    minDSCR           : Decimal
+      -- ^ Minimum Debt Service Coverage Ratio (e.g. 1.25)
+    maxLTV            : Decimal
+      -- ^ Maximum Loan-to-Value ratio as a fraction (e.g. 0.75 for 75%)
+    minLiquidity      : Decimal
+      -- ^ Minimum liquidity balance in facility currency (e.g. 5,000,000)
+
+    -- Current test results
+    lastTestDate      : Date
+      -- ^ Date of the most recent covenant test
+    leverageActual    : Decimal
+      -- ^ Borrower's actual leverage ratio at last test
+    dscrActual        : Decimal
+      -- ^ Borrower's actual DSCR at last test
+    ltvActual         : Decimal
+      -- ^ Borrower's actual LTV at last test
+    liquidityActual   : Decimal
+      -- ^ Borrower's actual liquidity at last test
+    breachStatus      : CovenantBreachStatus
+      -- ^ Current overall compliance status
+    curePeriodDays    : Int
+      -- ^ Days allowed for borrower to cure a breach (typically 30–45 days)
+
+  where
+    signatory borrower, agent
+    observer lenders ++ (optionalToList regulator)
+    ensure
+      maxLeverageRatio > 0.0 &&
+      minDSCR > 0.0 &&
+      maxLTV > 0.0 && maxLTV <= 1.0 &&
+      minLiquidity >= 0.0 &&
+      curePeriodDays >= 0
+
+    -- -----------------------------------------------------------------------
+    -- Choice: TestCovenant
+    -- Controller: agent
+    --
+    -- Runs the periodic covenant compliance test with the borrower's latest
+    -- financial data. Updates the breach status and returns the new contract.
+    --
+    -- Breach logic (all must pass):
+    --   leverageActual <= maxLeverageRatio
+    --   dscrActual     >= minDSCR
+    --   ltvActual      <= maxLTV
+    --   liquidityActual >= minLiquidity
+    -- -----------------------------------------------------------------------
+    choice TestCovenant : ContractId FacilityCovenants
+      with
+        testDate         : Date
+          -- ^ Date of the financial test
+        newLeverage      : Decimal
+          -- ^ Borrower-reported Net Debt / EBITDA
+        newDSCR          : Decimal
+          -- ^ Borrower-reported DSCR
+        newLTV           : Decimal
+          -- ^ Borrower-reported LTV
+        newLiquidity     : Decimal
+          -- ^ Borrower-reported liquidity balance
+      controller agent
+      do
+        assertMsg "Test date must be on or after last test date"
+          (testDate >= lastTestDate)
+        assertMsg "Leverage ratio must be non-negative" (newLeverage >= 0.0)
+        assertMsg "DSCR must be non-negative"           (newDSCR >= 0.0)
+        assertMsg "LTV must be between 0 and 1"         (newLTV >= 0.0 && newLTV <= 1.0)
+        assertMsg "Liquidity must be non-negative"      (newLiquidity >= 0.0)
+
+        -- Evaluate breach conditions
+        let leverageOk  = newLeverage  <= maxLeverageRatio
+            dscrOk      = newDSCR      >= minDSCR
+            ltvOk       = newLTV       <= maxLTV
+            liquidityOk = newLiquidity >= minLiquidity
+            allPass     = leverageOk && dscrOk && ltvOk && liquidityOk
+            newStatus   = if allPass then Compliant else Breached
+
+        create this with
+          lastTestDate    = testDate
+          leverageActual  = newLeverage
+          dscrActual      = newDSCR
+          ltvActual       = newLTV
+          liquidityActual = newLiquidity
+          breachStatus    = newStatus
+
+    -- -----------------------------------------------------------------------
+    -- Choice: WaiveCovenantBreach
+    -- Controller: agent
+    --
+    -- The agent formally waives an existing breach (subject to lender consent
+    -- in real deployments). Updates status to WaivedByAgent.
+    -- Can only be exercised when breachStatus == Breached.
+    -- -----------------------------------------------------------------------
+    choice WaiveCovenantBreach : ContractId FacilityCovenants
+      with
+        waiverReason : Text
+          -- ^ Free-text rationale for the waiver (stored on-ledger)
+      controller agent
+      do
+        assertMsg "Can only waive an active breach" (breachStatus == Breached)
+        assertMsg "Waiver reason must be provided"  (waiverReason /= "")
+        create this with breachStatus = WaivedByAgent
+
+    -- -----------------------------------------------------------------------
+    -- Choice: AccelerateOnBreach
+    -- Controller: agent
+    --
+    -- Declares loan acceleration after an uncured breach. This archives the
+    -- FacilityCovenants contract and creates an immutable BreachNotice.
+    -- In practice, acceleration requires majority lender consent.
+    -- -----------------------------------------------------------------------
+    choice AccelerateOnBreach : ContractId CovenantBreachNotice
+      with
+        accelerationDate : Date
+          -- ^ Date on which acceleration is declared
+        noticeText       : Text
+          -- ^ Formal notice language
+      controller agent
+      do
+        assertMsg "Acceleration only possible on Breached status"
+          (breachStatus == Breached)
+        assertMsg "Notice text must be provided" (noticeText /= "")
+
+        create CovenantBreachNotice with
+          facilityId
+          borrower
+          agent
+          lenders
+          regulator
+          accelerationDate
+          leverageAtBreach  = leverageActual
+          dscrAtBreach      = dscrActual
+          ltvAtBreach       = ltvActual
+          liquidityAtBreach = liquidityActual
+          noticeText
+
+-- ---------------------------------------------------------------------------
+-- | CovenantBreachNotice
+--
+-- Immutable on-ledger record of a covenant acceleration event.
+-- Visible to borrower, agent, all lenders, and the regulator.
+-- Serves as the authoritative audit trail for enforcement proceedings.
+-- ---------------------------------------------------------------------------
+template CovenantBreachNotice
+  with
+    facilityId        : Text
+    borrower          : Party
+    agent             : Party
+    lenders           : [Party]
+    regulator         : Optional Party
+    accelerationDate  : Date
+    leverageAtBreach  : Decimal
+    dscrAtBreach      : Decimal
+    ltvAtBreach       : Decimal
+    liquidityAtBreach : Decimal
+    noticeText        : Text
+  where
+    signatory agent
+    observer [borrower] ++ lenders ++ (optionalToList regulator)
+    ensure noticeText /= ""

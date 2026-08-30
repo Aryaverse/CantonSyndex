@@ -1,8 +1,8 @@
 # CantonSyndex — Development Progress Sheet
 
 > **Last Updated:** 2026-08-30 (Session 2)
-> **Total Commits:** 21
-> **Lines of Code:** ~6,100
+> **Total Commits:** 25
+> **Lines of Code:** ~7,200
 > **Target:** Client-testable MVP
 > **Estimated Remaining:** ~22 commits (~7–10 days)
 
@@ -14,7 +14,7 @@
 |---|---|---|
 | DAML Core Contracts | 80% | 🟢 Active |
 | DAML Script Tests | 70% | 🟢 Active |
-| TypeScript Bridge | 40% | 🟡 Partial |
+| TypeScript Bridge | 85% | 🟢 Active |
 | Frontend Dashboard | 30% | 🟡 Partial (simulated data) |
 | Canton Infrastructure | 75% | 🟢 Active |
 | Documentation | 75% | 🟢 Active |
@@ -125,8 +125,8 @@
 | 3 | 19 | DAR deployment + party provisioning scripts | ✅ Done (0f3103c) |
 | 4 | 20 | Makefile / run.sh one-command setup | ✅ Done (b2751b7) |
 | 5 | 21 | FacilityAmendment DAML template | ✅ Done (0c8ee00) |
-| 6 | 22 | FacilityAmendment tests | ⬜ Pending |
-| 7 | 23 | Bridge methods for new templates (Interest, Covenant, Fee) | ⬜ Pending |
+| 6 | 22 | FacilityAmendment tests | ✅ Done (fa3b0a2) |
+| 7 | 23 | Bridge methods for new templates (Interest, Covenant, Fee) | ✅ Done (1b62ba7) |
 | 8 | 24 | Frontend real API connection (replace simulatedState) | ⬜ Pending |
 | 9 | 25 | JWT auth per party (login screen) | ⬜ Pending |
 | 10 | 26 | Covenant Monitor UI panel | ⬜ Pending |
@@ -157,11 +157,11 @@
 
 | Metric | Current | At Completion |
 |---|---|---|
-| Total commits | 21 | ~36 |
+| Total commits | 25 | ~36 |
 | DAML templates | 12 | 12 ✅ (FacilityAmendmentProposal + Record added) |
 | DAML test scripts | 7 | 12 |
-| TypeScript bridge methods | 7 | 15 |
+| TypeScript bridge methods | 15 | 15 ✅ |
 | Frontend tabs | 5 | 8 |
-| Lines of code | ~6,100 | ~7,500 |
+| Lines of code | ~7,200 | ~7,500 |
 | CI/CD stages | 5 | 5 |
 | Documentation pages | 3 | 5 |

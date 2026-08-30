@@ -1,8 +1,8 @@
 # CantonSyndex — Development Progress Sheet
 
-> **Last Updated:** 2026-08-30
-> **Total Commits:** 16
-> **Lines of Code:** ~4,100
+> **Last Updated:** 2026-08-30 (Session 2)
+> **Total Commits:** 21
+> **Lines of Code:** ~6,100
 > **Target:** Client-testable MVP
 > **Estimated Remaining:** ~22 commits (~7–10 days)
 
@@ -16,7 +16,7 @@
 | DAML Script Tests | 70% | 🟢 Active |
 | TypeScript Bridge | 40% | 🟡 Partial |
 | Frontend Dashboard | 30% | 🟡 Partial (simulated data) |
-| Canton Infrastructure | 0% | 🔴 Not started |
+| Canton Infrastructure | 75% | 🟢 Active |
 | Documentation | 75% | 🟢 Active |
 | CI/CD Pipeline | 60% | 🟡 Partial |
 
@@ -120,11 +120,11 @@
 
 | # | Commit | Feature | Status |
 |---|--------|---------|--------|
-| 1 | 17 | Canton LocalNet docker-compose (Synchronizer + 3 nodes) | ⬜ Pending |
-| 2 | 18 | Canton config files per participant | ⬜ Pending |
-| 3 | 19 | DAR deployment + party provisioning scripts | ⬜ Pending |
-| 4 | 20 | Makefile / run.sh one-command setup | ⬜ Pending |
-| 5 | 21 | FacilityAmendment DAML template | ⬜ Pending |
+| 1 | 17 | Canton LocalNet docker-compose (Synchronizer + 3 nodes) | ✅ Done (5eab8cd) |
+| 2 | 18 | Canton config files per participant | ✅ Done (5eab8cd) |
+| 3 | 19 | DAR deployment + party provisioning scripts | ✅ Done (0f3103c) |
+| 4 | 20 | Makefile / run.sh one-command setup | ✅ Done (b2751b7) |
+| 5 | 21 | FacilityAmendment DAML template | ✅ Done (0c8ee00) |
 | 6 | 22 | FacilityAmendment tests | ⬜ Pending |
 | 7 | 23 | Bridge methods for new templates (Interest, Covenant, Fee) | ⬜ Pending |
 | 8 | 24 | Frontend real API connection (replace simulatedState) | ⬜ Pending |
@@ -157,11 +157,11 @@
 
 | Metric | Current | At Completion |
 |---|---|---|
-| Total commits | 16 | ~36 |
-| DAML templates | 10 | 11 (+FacilityAmendment) |
+| Total commits | 21 | ~36 |
+| DAML templates | 12 | 12 ✅ (FacilityAmendmentProposal + Record added) |
 | DAML test scripts | 7 | 12 |
 | TypeScript bridge methods | 7 | 15 |
 | Frontend tabs | 5 | 8 |
-| Lines of code | ~4,100 | ~7,500 |
+| Lines of code | ~6,100 | ~7,500 |
 | CI/CD stages | 5 | 5 |
 | Documentation pages | 3 | 5 |

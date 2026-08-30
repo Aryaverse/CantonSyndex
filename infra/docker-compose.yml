@@ -1,0 +1,200 @@
+# CantonSyndex — Canton LocalNet
+# Three-node privacy demonstration network
+#
+# Topology:
+#   canton-sync         — Canton Synchronizer (global ordering, no data access)
+#   canton-agent        — GlobalLeadBank participant node
+#   canton-banka        — AlphaBank participant node
+#   canton-bankb        — BetaBank participant node
+#
+# Usage:
+#   docker-compose -f infra/docker-compose.yml up -d
+#   docker-compose -f infra/docker-compose.yml logs -f
+
+version: '3.9'
+
+networks:
+  canton-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  sync-data:
+  agent-data:
+  banka-data:
+  bankb-data:
+
+services:
+
+  # =========================================================================
+  # Canton Synchronizer
+  # Provides global transaction ordering and commit validation.
+  # Does NOT store or see contract payloads — only cryptographic commitments.
+  # =========================================================================
+  canton-sync:
+    image: digitalasset/canton-open-source:2.9.4
+    container_name: cantonsyndex-sync
+    hostname: canton-sync
+    networks:
+      canton-net:
+        ipv4_address: 172.28.1.10
+    volumes:
+      - ./canton/synchronizer.conf:/canton/config/synchronizer.conf:ro
+      - sync-data:/canton/data
+    command:
+      - daemon
+      - --config=/canton/config/synchronizer.conf
+      - --log-level-root=INFO
+      - --log-encoder=plain
+    ports:
+      - "9018:9018"    # Synchronizer public API
+      - "9019:9019"    # Admin API
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9019/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+  # =========================================================================
+  # Participant Node: GlobalLeadBank (Lead Agent)
+  # Hosts: borrower party + agent party + MasterFacility contracts
+  # =========================================================================
+  canton-agent:
+    image: digitalasset/canton-open-source:2.9.4
+    container_name: cantonsyndex-agent
+    hostname: canton-agent
+    networks:
+      canton-net:
+        ipv4_address: 172.28.1.11
+    volumes:
+      - ./canton/participant-agent.conf:/canton/config/participant.conf:ro
+      - agent-data:/canton/data
+    command:
+      - daemon
+      - --config=/canton/config/participant.conf
+      - --log-level-root=INFO
+      - --log-encoder=plain
+    ports:
+      - "10011:10011"   # Ledger API (gRPC)
+      - "10012:10012"   # Admin API
+      - "10013:10013"   # HTTP JSON API
+    depends_on:
+      canton-sync:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10012/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    restart: unless-stopped
+    environment:
+      CANTON_PARTICIPANT_ID: "agent-participant"
+      CANTON_SYNC_HOST: "canton-sync"
+      CANTON_SYNC_PORT: "9018"
+
+  # =========================================================================
+  # Participant Node: AlphaBank
+  # Hosts: bankA party + TrancheParticipation (AlphaBank only)
+  # BetaBank's participant node has ZERO visibility into this node's contracts
+  # =========================================================================
+  canton-banka:
+    image: digitalasset/canton-open-source:2.9.4
+    container_name: cantonsyndex-banka
+    hostname: canton-banka
+    networks:
+      canton-net:
+        ipv4_address: 172.28.1.12
+    volumes:
+      - ./canton/participant-banka.conf:/canton/config/participant.conf:ro
+      - banka-data:/canton/data
+    command:
+      - daemon
+      - --config=/canton/config/participant.conf
+      - --log-level-root=INFO
+      - --log-encoder=plain
+    ports:
+      - "10021:10021"   # Ledger API (gRPC)
+      - "10022:10022"   # Admin API
+      - "10023:10023"   # HTTP JSON API
+    depends_on:
+      canton-sync:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10022/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    restart: unless-stopped
+    environment:
+      CANTON_PARTICIPANT_ID: "banka-participant"
+      CANTON_SYNC_HOST: "canton-sync"
+      CANTON_SYNC_PORT: "9018"
+
+  # =========================================================================
+  # Participant Node: BetaBank
+  # Hosts: bankB party + TrancheParticipation (BetaBank only)
+  # AlphaBank's node has ZERO visibility into this node's contracts
+  # =========================================================================
+  canton-bankb:
+    image: digitalasset/canton-open-source:2.9.4
+    container_name: cantonsyndex-bankb
+    hostname: canton-bankb
+    networks:
+      canton-net:
+        ipv4_address: 172.28.1.13
+    volumes:
+      - ./canton/participant-bankb.conf:/canton/config/participant.conf:ro
+      - bankb-data:/canton/data
+    command:
+      - daemon
+      - --config=/canton/config/participant.conf
+      - --log-level-root=INFO
+      - --log-encoder=plain
+    ports:
+      - "10031:10031"   # Ledger API (gRPC)
+      - "10032:10032"   # Admin API
+      - "10033:10033"   # HTTP JSON API
+    depends_on:
+      canton-sync:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:10032/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+    restart: unless-stopped
+    environment:
+      CANTON_PARTICIPANT_ID: "bankb-participant"
+      CANTON_SYNC_HOST: "canton-sync"
+      CANTON_SYNC_PORT: "9018"
+
+  # =========================================================================
+  # Canton Navigator (optional — for visual contract inspection)
+  # Access: http://localhost:7500
+  # Login as: GlobalLeadBank, AlphaBank, or BetaBank
+  # =========================================================================
+  canton-navigator:
+    image: digitalasset/daml-navigator:2.9.4
+    container_name: cantonsyndex-navigator
+    hostname: canton-navigator
+    networks:
+      - canton-net
+    ports:
+      - "7500:7500"
+    depends_on:
+      canton-agent:
+        condition: service_healthy
+    environment:
+      LEDGER_HOST: "canton-agent"
+      LEDGER_PORT: "10011"
+    command: ["server", "canton-agent", "10011"]
+    restart: unless-stopped
+    profiles:
+      - navigator   # Only starts with: docker-compose --profile navigator up

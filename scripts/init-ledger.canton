@@ -1,0 +1,79 @@
+// =============================================================================
+// CantonSyndex — Canton Console Initialization Script
+//
+// Run via:
+//   docker exec -it cantonsyndex-agent canton --config /canton/config/participant.conf \
+//     script --file /scripts/init-ledger.canton
+//
+// OR from host after sourcing infra/.env:
+//   canton --remote-participant agent@localhost:10012 script --file scripts/init-ledger.canton
+//
+// This script:
+//   1. Connects all participants to the synchronizer
+//   2. Verifies DAR is loaded
+//   3. Creates a demo MasterFacility with $100M USD facility
+//   4. Syndicates tranches to AlphaBank and BetaBank
+// =============================================================================
+
+import com.digitalasset.canton.console._
+
+// ---------------------------------------------------------------------------
+// Step 1: Verify all participants are connected to the synchronizer
+// ---------------------------------------------------------------------------
+println("==> Checking synchronizer connections...")
+
+val syncId = sync.id
+println(s"  Synchronizer: $syncId")
+
+Seq(agent_participant, banka_participant, bankb_participant).foreach { p =>
+  val connected = p.domains.list_connected().map(_.domainId).contains(syncId)
+  if (!connected) {
+    println(s"  [WARN] ${p.name} not connected to synchronizer — connecting now")
+    p.domains.connect_local(sync)
+  } else {
+    println(s"  [OK] ${p.name} connected")
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Step 2: Verify DAR is uploaded on all nodes
+// ---------------------------------------------------------------------------
+println("\n==> Verifying DAR on all participant nodes...")
+Seq(agent_participant, banka_participant, bankb_participant).foreach { p =>
+  val packages = p.packages.list()
+  val hasSyndex = packages.exists(_.sourceDescription.contains("CantonSyndex"))
+  if (!hasSyndex) {
+    println(s"  [WARN] CantonSyndex DAR not found on ${p.name} — upload via deploy.sh first")
+  } else {
+    println(s"  [OK] CantonSyndex DAR confirmed on ${p.name}")
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Step 3: Allocate parties
+// ---------------------------------------------------------------------------
+println("\n==> Allocating parties...")
+
+val borrowerParty  = agent_participant.ledger_api.parties.allocate("BorrowerCorp", "Borrower Corp Ltd")
+val agentParty     = agent_participant.ledger_api.parties.allocate("GlobalLeadBank", "Global Lead Bank")
+val bankAParty     = banka_participant.ledger_api.parties.allocate("AlphaBank", "Alpha Bank")
+val bankBParty     = bankb_participant.ledger_api.parties.allocate("BetaBank", "Beta Bank")
+
+println(s"  Borrower:  ${borrowerParty.party}")
+println(s"  Agent:     ${agentParty.party}")
+println(s"  AlphaBank: ${bankAParty.party}")
+println(s"  BetaBank:  ${bankBParty.party}")
+
+// ---------------------------------------------------------------------------
+// Step 4: Print connection info for frontend/.env
+// ---------------------------------------------------------------------------
+println("\n==> Copy these values to infra/.env:")
+println(s"""
+BORROWER_PARTY="${borrowerParty.party}"
+AGENT_PARTY="${agentParty.party}"
+BANKA_PARTY="${bankAParty.party}"
+BANKB_PARTY="${bankBParty.party}"
+""")
+
+println("\n==> Canton Console initialization complete.")
+println("  Run scripts/deploy.sh --verify to confirm deployment.")

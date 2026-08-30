@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+# =============================================================================
+# CantonSyndex — DAR Deployment & Party Provisioning Script
+#
+# Usage:
+#   ./scripts/deploy.sh              # Deploy to LocalNet (default)
+#   ./scripts/deploy.sh --clean      # Clean restart before deploy
+#   ./scripts/deploy.sh --verify     # Verify deployment after upload
+#
+# Requirements:
+#   - Docker + docker-compose running (make start)
+#   - daml CLI installed (daml build must have succeeded)
+#   - curl, jq installed
+# =============================================================================
+
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+AGENT_LEDGER_API="http://localhost:10011"
+BANKA_LEDGER_API="http://localhost:10021"
+BANKB_LEDGER_API="http://localhost:10031"
+AGENT_ADMIN_API="http://localhost:10012"
+BANKA_ADMIN_API="http://localhost:10022"
+BANKB_ADMIN_API="http://localhost:10032"
+
+DAR_PATH=".daml/dist/CantonSyndex-0.1.0.dar"
+DAR_HASH_FILE=".daml/dist/CantonSyndex-0.1.0.dar.hash"
+
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+log_step() { echo -e "\n${BLUE}==>${NC} $1"; }
+log_ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
+log_warn() { echo -e "  ${YELLOW}⚠${NC} $1"; }
+log_fail() { echo -e "  ${RED}✗${NC} $1"; exit 1; }
+
+wait_for_api() {
+  local url="$1"
+  local name="$2"
+  local max_attempts=30
+  local attempt=0
+
+  echo -n "  Waiting for $name to be ready"
+  while ! curl -sf "$url/health" > /dev/null 2>&1; do
+    sleep 2
+    attempt=$((attempt+1))
+    echo -n "."
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      echo ""
+      log_fail "$name did not become ready in time"
+    fi
+  done
+  echo ""
+  log_ok "$name is ready"
+}
+
+upload_dar() {
+  local api="$1"
+  local name="$2"
+  log_step "Uploading DAR to $name ($api)"
+
+  response=$(curl -sf \
+    -X POST \
+    -H "Content-Type: application/octet-stream" \
+    --data-binary "@${DAR_PATH}" \
+    "${api}/v1/packages" 2>&1) || {
+      log_warn "DAR may already be uploaded to $name (idempotent)"
+      return 0
+    }
+  log_ok "DAR uploaded to $name"
+}
+
+allocate_party() {
+  local api="$1"
+  local hint="$2"
+  local display="$3"
+
+  response=$(curl -sf \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -d "{\"identifierHint\": \"$hint\", \"displayName\": \"$display\"}" \
+    "${api}/v1/parties/allocate" 2>&1)
+
+  party_id=$(echo "$response" | jq -r '.result.party // empty' 2>/dev/null || true)
+
+  if [ -n "$party_id" ]; then
+    log_ok "Allocated $display: $party_id"
+    echo "$party_id"
+  else
+    log_warn "Could not allocate $display (may already exist): $response"
+    echo ""
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Parse arguments
+# ---------------------------------------------------------------------------
+CLEAN=false
+VERIFY=false
+for arg in "$@"; do
+  case "$arg" in
+    --clean)  CLEAN=true ;;
+    --verify) VERIFY=true ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+echo ""
+echo "╔══════════════════════════════════════════════╗"
+echo "║   CantonSyndex — DAR Deployment Script       ║"
+echo "║   Privacy-Preserving Syndicated Loan Engine  ║"
+echo "╚══════════════════════════════════════════════╝"
+
+# Step 1: Build DAR
+log_step "Building DAML DAR"
+daml build
+log_ok "DAR built: $DAR_PATH"
+
+# Step 2: Wait for all nodes
+log_step "Waiting for Canton nodes to be ready"
+wait_for_api "$AGENT_ADMIN_API" "GlobalLeadBank (agent)"
+wait_for_api "$BANKA_ADMIN_API" "AlphaBank (banka)"
+wait_for_api "$BANKB_ADMIN_API" "BetaBank (bankb)"
+
+# Step 3: Upload DAR to all participant nodes
+log_step "Uploading DAR to all participant nodes"
+upload_dar "$AGENT_LEDGER_API" "GlobalLeadBank"
+upload_dar "$BANKA_LEDGER_API" "AlphaBank"
+upload_dar "$BANKB_LEDGER_API" "BetaBank"
+
+# Step 4: Allocate parties
+log_step "Allocating parties on each participant node"
+
+# Agent node: Borrower + Agent
+BORROWER_ID=$(allocate_party "$AGENT_LEDGER_API" "BorrowerCorp"    "Borrower Corp Ltd")
+AGENT_ID=$(allocate_party    "$AGENT_LEDGER_API" "GlobalLeadBank"  "Global Lead Bank (Agent)")
+
+# AlphaBank node: AlphaBank party
+BANKA_ID=$(allocate_party    "$BANKA_LEDGER_API" "AlphaBank"       "Alpha Bank (Lender A)")
+
+# BetaBank node: BetaBank party
+BANKB_ID=$(allocate_party    "$BANKB_LEDGER_API" "BetaBank"        "Beta Bank (Lender B)")
+
+# Step 5: Write party IDs to .env file for frontend and bridge
+log_step "Writing party IDs to infra/.env"
+cat > infra/.env << ENV_EOF
+# CantonSyndex Party IDs — auto-generated by deploy.sh
+# Source this file: source infra/.env
+
+BORROWER_PARTY="${BORROWER_ID}"
+AGENT_PARTY="${AGENT_ID}"
+BANKA_PARTY="${BANKA_ID}"
+BANKB_PARTY="${BANKB_ID}"
+
+# Ledger API endpoints
+AGENT_LEDGER_URL="${AGENT_LEDGER_API}"
+BANKA_LEDGER_URL="${BANKA_LEDGER_API}"
+BANKB_LEDGER_URL="${BANKB_LEDGER_API}"
+
+# Canton Synchronizer
+SYNC_URL="http://localhost:9018"
+ENV_EOF
+log_ok "Party IDs written to infra/.env"
+
+# Step 6: Verify (optional)
+if [ "$VERIFY" = true ]; then
+  log_step "Verifying deployment"
+  pkg_count=$(curl -sf "${AGENT_LEDGER_API}/v1/packages" | jq '.result | length' 2>/dev/null || echo "0")
+  if [ "$pkg_count" -gt 0 ]; then
+    log_ok "Agent node has $pkg_count package(s) loaded"
+  else
+    log_warn "No packages found on agent node — check upload"
+  fi
+fi
+
+echo ""
+echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║   Deployment complete! ✓                     ║${NC}"
+echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
+echo ""
+echo "  Dashboard:      http://localhost:5500/frontend/"
+echo "  Navigator:      http://localhost:7500  (if --profile navigator)"
+echo "  Agent Ledger:   $AGENT_LEDGER_API"
+echo "  AlphaBank:      $BANKA_LEDGER_API"
+echo "  BetaBank:       $BANKB_LEDGER_API"
+echo ""
+echo "  Next: open frontend/index.html or run: make demo"
+echo ""

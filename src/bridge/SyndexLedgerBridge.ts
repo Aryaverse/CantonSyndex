@@ -430,4 +430,347 @@ export class SyndexLedgerBridge {
       stopReceipts();
     };
   }
+
+  // =========================================================================
+  // Interest Accrual Methods
+  // =========================================================================
+
+  /**
+   * Create a new InterestAccrual contract for a lender's tranche.
+   * Both agent and lender must authorize (submitMulti in Canton terms).
+   */
+  async createInterestAccrual(
+    facilityId: string,
+    trancheId: string,
+    lenderParty: Party,
+    principalBalance: number,
+    marginSpreadBps: number,
+    baseRateBps: number,
+    periodStartDate: string,
+    periodEndDate: string,
+    dayCountConvention: "Actual365Fixed" | "Actual360" | "Thirty360"
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [this.actingParty, lenderParty],
+      commands: [{
+        type: "create",
+        templateId: `${this.packageId}:CantonSyndex.Core:InterestAccrual`,
+        payload: {
+          facilityId,
+          trancheId,
+          agent: this.actingParty,
+          lender: lenderParty,
+          principalBalance,
+          marginSpreadBps,
+          baseRateBps,
+          periodStartDate,
+          periodEndDate,
+          dayCountConvention: { tag: dayCountConvention, value: {} },
+          accruedInterest: 0.0,
+          isSettled: false,
+        },
+      }],
+    });
+  }
+
+  /**
+   * Trigger interest accrual calculation up to accrualDate.
+   * Returns the updated InterestAccrual contract ID.
+   */
+  async accrueInterest(
+    accrualContractId: ContractId,
+    accrualDate: string
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [this.actingParty],
+      commands: [{
+        type: "exercise",
+        templateId: `${this.packageId}:CantonSyndex.Core:InterestAccrual`,
+        contractId: accrualContractId,
+        choice: "AccrueInterest",
+        argument: { accrualDate },
+      }],
+    });
+  }
+
+  /**
+   * Collect accrued interest at period end → creates InterestPaymentReceipt.
+   */
+  async collectInterest(
+    accrualContractId: ContractId,
+    settlementDate: string
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [this.actingParty],
+      commands: [{
+        type: "exercise",
+        templateId: `${this.packageId}:CantonSyndex.Core:InterestAccrual`,
+        contractId: accrualContractId,
+        choice: "CollectInterest",
+        argument: { settlementDate },
+      }],
+    });
+  }
+
+  /**
+   * Query all InterestPaymentReceipts visible to the calling party.
+   * Each lender only sees their own receipts (Canton sub-tx privacy).
+   */
+  async getInterestReceipts(
+    facilityId?: string
+  ): Promise<ActiveContract[]> {
+    const all = await this.queryContracts(
+      `${this.packageId}:CantonSyndex.Core:InterestPaymentReceipt`
+    );
+    if (facilityId) {
+      return all.filter(c => (c.payload as any).facilityId === facilityId);
+    }
+    return all;
+  }
+
+  // =========================================================================
+  // Covenant Tracking Methods
+  // =========================================================================
+
+  /**
+   * Create FacilityCovenants contract with initial threshold values.
+   * Both borrower and agent are signatories.
+   */
+  async createFacilityCovenants(
+    facilityId: string,
+    borrowerParty: Party,
+    lenderParties: Party[],
+    regulatorParty: Party | null,
+    maxLeverageRatio: number,
+    minDSCR: number,
+    maxLTV: number,
+    minLiquidity: number,
+    curePeriodDays: number,
+    initialTestDate: string
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [this.actingParty, borrowerParty],
+      commands: [{
+        type: "create",
+        templateId: `${this.packageId}:CantonSyndex.Core:FacilityCovenants`,
+        payload: {
+          facilityId,
+          borrower: borrowerParty,
+          agent: this.actingParty,
+          lenders: lenderParties,
+          regulator: regulatorParty ? { tag: "Some", value: regulatorParty } : { tag: "None", value: {} },
+          maxLeverageRatio,
+          minDSCR,
+          maxLTV,
+          minLiquidity,
+          lastTestDate: initialTestDate,
+          leverageActual: 0.0,
+          dscrActual: 0.0,
+          ltvActual: 0.0,
+          liquidityActual: 0.0,
+          breachStatus: { tag: "Compliant", value: {} },
+          curePeriodDays,
+        },
+      }],
+    });
+  }
+
+  /**
+   * Run a quarterly covenant test with new financial data.
+   * Returns updated FacilityCovenants contract (Compliant or Breached).
+   */
+  async testCovenant(
+    covenantContractId: ContractId,
+    testDate: string,
+    newLeverage: number,
+    newDSCR: number,
+    newLTV: number,
+    newLiquidity: number
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [this.actingParty],
+      commands: [{
+        type: "exercise",
+        templateId: `${this.packageId}:CantonSyndex.Core:FacilityCovenants`,
+        contractId: covenantContractId,
+        choice: "TestCovenant",
+        argument: { testDate, newLeverage, newDSCR, newLTV, newLiquidity },
+      }],
+    });
+  }
+
+  /**
+   * Query the current covenant status for a facility.
+   */
+  async getCovenantStatus(facilityId: string): Promise<ActiveContract | null> {
+    const results = await this.queryContracts(
+      `${this.packageId}:CantonSyndex.Core:FacilityCovenants`
+    );
+    const match = results.find(c => (c.payload as any).facilityId === facilityId);
+    return match ?? null;
+  }
+
+  // =========================================================================
+  // Commitment Fee Methods
+  // =========================================================================
+
+  /**
+   * Create a CommitmentFeeAccrual for a lender's undrawn commitment.
+   */
+  async createCommitmentFeeAccrual(
+    facilityId: string,
+    trancheId: string,
+    lenderParty: Party,
+    commitmentAmount: number,
+    drawnAmount: number,
+    feeBps: number,
+    periodStartDate: string,
+    periodEndDate: string
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [this.actingParty, lenderParty],
+      commands: [{
+        type: "create",
+        templateId: `${this.packageId}:CantonSyndex.Core:CommitmentFeeAccrual`,
+        payload: {
+          facilityId,
+          trancheId,
+          agent: this.actingParty,
+          lender: lenderParty,
+          commitmentAmount,
+          drawnAmount,
+          feeBps,
+          periodStartDate,
+          periodEndDate,
+          accruedFee: 0.0,
+          isSettled: false,
+        },
+      }],
+    });
+  }
+
+  /**
+   * Accrue commitment fee up to accrualDate (Actual/365).
+   */
+  async accrueCommitmentFee(
+    feeContractId: ContractId,
+    accrualDate: string
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [this.actingParty],
+      commands: [{
+        type: "exercise",
+        templateId: `${this.packageId}:CantonSyndex.Core:CommitmentFeeAccrual`,
+        contractId: feeContractId,
+        choice: "AccrueCommitmentFee",
+        argument: { accrualDate },
+      }],
+    });
+  }
+
+  /**
+   * Collect commitment fee at period end → CommitmentFeeReceipt.
+   */
+  async collectCommitmentFee(
+    feeContractId: ContractId,
+    settlementDate: string
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [this.actingParty],
+      commands: [{
+        type: "exercise",
+        templateId: `${this.packageId}:CantonSyndex.Core:CommitmentFeeAccrual`,
+        contractId: feeContractId,
+        choice: "CollectCommitmentFee",
+        argument: { settlementDate },
+      }],
+    });
+  }
+
+  // =========================================================================
+  // Facility Amendment Methods
+  // =========================================================================
+
+  /**
+   * Propose a facility amendment (borrower + agent sign).
+   */
+  async proposeAmendment(
+    facilityId: string,
+    proposalId: string,
+    borrowerParty: Party,
+    lenderParties: Party[],
+    amendmentType: string,
+    rationale: string,
+    proposalDate: string,
+    expiryDate: string,
+    proposedNewLimit?: number,
+    proposedNewMaturity?: string
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [this.actingParty, borrowerParty],
+      commands: [{
+        type: "create",
+        templateId: `${this.packageId}:CantonSyndex.Core:FacilityAmendmentProposal`,
+        payload: {
+          facilityId,
+          proposalId,
+          borrower: borrowerParty,
+          agent: this.actingParty,
+          lenders: lenderParties,
+          amendmentType: { tag: amendmentType, value: {} },
+          proposedNewLimit: proposedNewLimit != null
+            ? { tag: "Some", value: proposedNewLimit }
+            : { tag: "None", value: {} },
+          proposedNewMaturity: proposedNewMaturity != null
+            ? { tag: "Some", value: proposedNewMaturity }
+            : { tag: "None", value: {} },
+          newLender: { tag: "None", value: {} },
+          removedLender: { tag: "None", value: {} },
+          rationale,
+          proposalDate,
+          expiryDate,
+          acceptedBy: [],
+          rejectedBy: [],
+        },
+      }],
+    });
+  }
+
+  /**
+   * Lender votes to accept an amendment proposal.
+   */
+  async acceptAmendment(
+    proposalContractId: ContractId,
+    lenderParty: Party
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [lenderParty],
+      commands: [{
+        type: "exercise",
+        templateId: `${this.packageId}:CantonSyndex.Core:FacilityAmendmentProposal`,
+        contractId: proposalContractId,
+        choice: "AcceptAmendment",
+        argument: { lender: lenderParty },
+      }],
+    });
+  }
+
+  /**
+   * Agent executes amendment once consent threshold is met.
+   */
+  async executeAmendment(
+    proposalContractId: ContractId,
+    executionDate: string
+  ): Promise<CommandResult> {
+    return this.submitAndWait({
+      actAs: [this.actingParty],
+      commands: [{
+        type: "exercise",
+        templateId: `${this.packageId}:CantonSyndex.Core:FacilityAmendmentProposal`,
+        contractId: proposalContractId,
+        choice: "ExecuteAmendment",
+        argument: { executionDate },
+      }],
+    });
+  }
 }

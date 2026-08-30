@@ -923,3 +923,232 @@ template CommitmentFeeReceipt
     signatory agent
     observer lender
     ensure accruedFee >= 0.0 && feeBps >= 0.0
+
+-- ---------------------------------------------------------------------------
+-- | AmendmentType
+--
+-- Categorises the kind of change being proposed to the facility.
+-- Different amendment types require different consent thresholds in practice
+-- (e.g. maturity extension may require supermajority lender consent).
+-- ---------------------------------------------------------------------------
+data AmendmentType
+  = IncreaseCreditLimit
+    -- ^ Increase the totalLimit — requires all lenders to consent
+  | ExtendMaturity
+    -- ^ Extend the facility maturity date — typically supermajority (66.67%)
+  | AddLender
+    -- ^ Onboard a new lender to the syndicate — agent + borrower + majority
+  | RemoveLender
+    -- ^ Remove an existing lender (via buy-out) — agent + affected lender
+  | ReduceCreditLimit
+    -- ^ Voluntary commitment reduction — majority lender consent
+  | ChangeCurrency
+    -- ^ Cross-currency amendment — all signatories must consent
+  deriving (Show, Eq)
+
+-- ---------------------------------------------------------------------------
+-- | FacilityAmendmentProposal
+--
+-- Multi-party consent workflow for modifying MasterFacility terms.
+-- The agent proposes an amendment; each lender either accepts or rejects;
+-- once the required threshold is reached, the agent executes the amendment.
+--
+-- PRIVACY: Borrower + Agent are signatories; all lenders are observers
+--          so every participant can see the proposal and cast their vote.
+--
+-- Consent model (simplified for this implementation):
+--   - All votes required for IncreaseCreditLimit / ChangeCurrency
+--   - Majority (> 50%) for all other amendment types
+-- ---------------------------------------------------------------------------
+template FacilityAmendmentProposal
+  with
+    facilityId       : Text
+      -- ^ Reference to the MasterFacility being amended
+    proposalId       : Text
+      -- ^ Unique amendment identifier (e.g. "AMEND-FAC-2026-001")
+    borrower         : Party
+      -- ^ Borrower who benefits from / agrees to the amendment
+    agent            : Party
+      -- ^ Lead Agent proposing the amendment
+    lenders          : [Party]
+      -- ^ All current lenders who must vote
+    amendmentType    : AmendmentType
+      -- ^ Category of change being proposed
+    proposedNewLimit : Optional Decimal
+      -- ^ For IncreaseCreditLimit / ReduceCreditLimit: new totalLimit
+    proposedNewMaturity : Optional Date
+      -- ^ For ExtendMaturity: new maturity date
+    newLender        : Optional Party
+      -- ^ For AddLender: the party to be onboarded
+    removedLender    : Optional Party
+      -- ^ For RemoveLender: the party to be removed
+    rationale        : Text
+      -- ^ Free-text business rationale stored on-ledger
+    proposalDate     : Date
+      -- ^ Date the amendment was proposed
+    expiryDate       : Date
+      -- ^ Deadline for lender votes (after which proposal lapses)
+    acceptedBy       : [Party]
+      -- ^ Lenders who have voted to accept
+    rejectedBy       : [Party]
+      -- ^ Lenders who have voted to reject
+
+  where
+    signatory borrower, agent
+    observer lenders
+    ensure
+      proposalId /= "" &&
+      rationale /= "" &&
+      expiryDate >= proposalDate &&
+      -- A lender cannot be in both lists
+      null (filter (\p -> elem p rejectedBy) acceptedBy)
+
+    -- -----------------------------------------------------------------------
+    -- Choice: AcceptAmendment
+    -- Controller: any lender in the lenders list
+    --
+    -- Records the lender's acceptance. Once the required threshold is met,
+    -- the agent can call ExecuteAmendment.
+    -- -----------------------------------------------------------------------
+    choice AcceptAmendment : ContractId FacilityAmendmentProposal
+      with
+        lender : Party
+          -- ^ The lender casting their acceptance vote
+      controller lender
+      do
+        assertMsg "Only a syndicate lender can vote"
+          (elem lender lenders)
+        assertMsg "Lender has already voted to accept"
+          (not (elem lender acceptedBy))
+        assertMsg "Lender has already voted to reject"
+          (not (elem lender rejectedBy))
+
+        create this with acceptedBy = lender :: acceptedBy
+
+    -- -----------------------------------------------------------------------
+    -- Choice: RejectAmendment
+    -- Controller: any lender in the lenders list
+    --
+    -- Records the lender's rejection. A rejection does not archive the
+    -- proposal — the agent may still proceed if threshold is met.
+    -- -----------------------------------------------------------------------
+    choice RejectAmendment : ContractId FacilityAmendmentProposal
+      with
+        lender : Party
+          -- ^ The lender casting their rejection vote
+      controller lender
+      do
+        assertMsg "Only a syndicate lender can vote"
+          (elem lender lenders)
+        assertMsg "Lender has already voted"
+          (not (elem lender acceptedBy) && not (elem lender rejectedBy))
+
+        create this with rejectedBy = lender :: rejectedBy
+
+    -- -----------------------------------------------------------------------
+    -- Choice: ExecuteAmendment
+    -- Controller: agent
+    --
+    -- Executes the amendment after verifying the consent threshold.
+    -- Archives this proposal and creates an immutable FacilityAmendmentRecord.
+    --
+    -- Consent threshold:
+    --   IncreaseCreditLimit / ChangeCurrency: all lenders must accept
+    --   All other types: strict majority (> 50% of lenders)
+    -- -----------------------------------------------------------------------
+    choice ExecuteAmendment : ContractId FacilityAmendmentRecord
+      with
+        executionDate : Date
+          -- ^ Date the amendment takes effect
+      controller agent
+      do
+        assertMsg "Execution date must be on or after proposal date"
+          (executionDate >= proposalDate)
+        assertMsg "Execution date must be on or before expiry date"
+          (executionDate <= expiryDate)
+
+        let totalLenders   = length lenders
+            acceptedCount  = length acceptedBy
+
+            -- Unanimous required for major structural changes
+            unanimousRequired = amendmentType == IncreaseCreditLimit ||
+                                amendmentType == ChangeCurrency
+
+            consentMet = if unanimousRequired
+                           then acceptedCount == totalLenders
+                           else acceptedCount * 2 > totalLenders  -- strict majority
+
+        assertMsg
+          ("Insufficient lender consent. Accepted: " <> show acceptedCount <>
+           " / " <> show totalLenders <>
+           ". Required: " <> if unanimousRequired then "unanimous" else "majority")
+          consentMet
+
+        create FacilityAmendmentRecord with
+          facilityId
+          proposalId
+          borrower
+          agent
+          lenders
+          amendmentType
+          proposedNewLimit
+          proposedNewMaturity
+          newLender
+          removedLender
+          rationale
+          proposalDate
+          executionDate
+          acceptedBy
+          rejectedBy
+          totalLenders
+          acceptedCount
+
+    -- -----------------------------------------------------------------------
+    -- Choice: LapseProposal
+    -- Controller: agent
+    --
+    -- Lapses an expired amendment proposal, archiving it without execution.
+    -- Can be used to clean up proposals that did not reach consent threshold.
+    -- -----------------------------------------------------------------------
+    choice LapseProposal : ()
+      with
+        lapseDate : Date
+      controller agent
+      do
+        assertMsg "Can only lapse after expiry date"
+          (lapseDate > expiryDate)
+        return ()
+
+-- ---------------------------------------------------------------------------
+-- | FacilityAmendmentRecord
+--
+-- Immutable on-ledger record of an executed facility amendment.
+-- All parties (borrower, agent, lenders) are observers.
+-- Provides the complete consent audit trail: who voted yes/no, final counts.
+-- ---------------------------------------------------------------------------
+template FacilityAmendmentRecord
+  with
+    facilityId         : Text
+    proposalId         : Text
+    borrower           : Party
+    agent              : Party
+    lenders            : [Party]
+    amendmentType      : AmendmentType
+    proposedNewLimit   : Optional Decimal
+    proposedNewMaturity : Optional Date
+    newLender          : Optional Party
+    removedLender      : Optional Party
+    rationale          : Text
+    proposalDate       : Date
+    executionDate      : Date
+    acceptedBy         : [Party]
+    rejectedBy         : [Party]
+    totalLenders       : Int
+    acceptedCount      : Int
+  where
+    signatory agent
+    observer [borrower] ++ lenders
+    ensure
+      proposalId /= "" &&
+      acceptedCount >= 0 &&
+      totalLenders >= 0

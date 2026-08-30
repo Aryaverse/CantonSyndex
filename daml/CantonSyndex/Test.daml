@@ -776,3 +776,229 @@ testCommitmentFeeMidPeriodDrawdown = script do
         (f.accruedFee < preFee || preFee == 0.0)
 
   return ()
+
+-- ---------------------------------------------------------------------------
+-- | testAmendmentUnanimousConsent
+--
+-- Validates IncreaseCreditLimit amendment requiring ALL lenders to vote yes:
+--   1. Agent + Borrower propose: increase $100M → $150M
+--   2. AlphaBank accepts, BetaBank accepts → unanimous
+--   3. Agent executes → FacilityAmendmentRecord created
+--   4. Guard: early execution without full consent rejected
+-- ---------------------------------------------------------------------------
+testAmendmentUnanimousConsent : Script ()
+testAmendmentUnanimousConsent = script do
+
+  borrower <- allocatePartyWithHint "BorrowerCorp9"   (PartyIdHint "BORROWER9")
+  agent    <- allocatePartyWithHint "GlobalLeadBank9" (PartyIdHint "AGENT9")
+  bankA    <- allocatePartyWithHint "AlphaBank9"      (PartyIdHint "BANK_A9")
+  bankB    <- allocatePartyWithHint "BetaBank9"       (PartyIdHint "BANK_B9")
+
+  -- =========================================================================
+  -- STEP 1: Propose credit limit increase $100M → $150M
+  --   IncreaseCreditLimit requires UNANIMOUS consent
+  -- =========================================================================
+  proposalCid <- submitMulti [borrower, agent] [] do
+    createCmd FacilityAmendmentProposal with
+      facilityId          = "FAC-2026-USD-100M"
+      proposalId          = "AMEND-FAC-2026-001"
+      borrower            = borrower
+      agent               = agent
+      lenders             = [bankA, bankB]
+      amendmentType       = IncreaseCreditLimit
+      proposedNewLimit    = Some 150_000_000.0
+      proposedNewMaturity = None
+      newLender           = None
+      removedLender       = None
+      rationale           = "Borrower requires additional $50M capacity for \
+                            \Q4 2026 acquisition financing. Financial metrics \
+                            \support increased limit: leverage 3.8x vs 4.5x max."
+      proposalDate        = date 2026 Sep 1
+      expiryDate          = date 2026 Sep 30
+      acceptedBy          = []
+      rejectedBy          = []
+
+  -- =========================================================================
+  -- Guard: Agent cannot execute before unanimous consent
+  -- =========================================================================
+  earlyExec <- tryToEither $ submit agent do
+    exerciseCmd proposalCid ExecuteAmendment with
+      executionDate = date 2026 Sep 5
+  case earlyExec of
+    Left  _ -> return ()  -- Expected: insufficient consent
+    Right _ -> assertFail "ExecuteAmendment should fail with 0 acceptances (unanimous required)"
+
+  -- =========================================================================
+  -- STEP 2: AlphaBank accepts
+  -- =========================================================================
+  afterBankACid <- submit bankA do
+    exerciseCmd proposalCid AcceptAmendment with lender = bankA
+
+  -- Guard: still needs BetaBank — cannot execute yet
+  partialExec <- tryToEither $ submit agent do
+    exerciseCmd afterBankACid ExecuteAmendment with
+      executionDate = date 2026 Sep 10
+  case partialExec of
+    Left  _ -> return ()  -- Expected: 1/2 not unanimous
+    Right _ -> assertFail "Should fail with only 1/2 votes for unanimous amendment"
+
+  -- =========================================================================
+  -- STEP 3: BetaBank accepts → unanimous reached
+  -- =========================================================================
+  afterBankBCid <- submit bankB do
+    exerciseCmd afterBankACid AcceptAmendment with lender = bankB
+
+  -- =========================================================================
+  -- STEP 4: Agent executes amendment
+  -- =========================================================================
+  recordCid <- submit agent do
+    exerciseCmd afterBankBCid ExecuteAmendment with
+      executionDate = date 2026 Sep 15
+
+  -- =========================================================================
+  -- STEP 5: Verify FacilityAmendmentRecord — all parties see it
+  -- =========================================================================
+  borrowerView <- queryContractId borrower recordCid
+  bankAView    <- queryContractId bankA    recordCid
+  bankBView    <- queryContractId bankB    recordCid
+
+  assertMsg "Borrower must see amendment record" (borrowerView /= None)
+  assertMsg "AlphaBank must see amendment record" (bankAView /= None)
+  assertMsg "BetaBank must see amendment record"  (bankBView /= None)
+
+  case bankAView of
+    None -> assertFail "BankA cannot see record"
+    Some r -> do
+      assertMsg "Accepted count should be 2"  (r.acceptedCount == 2)
+      assertMsg "Total lenders should be 2"   (r.totalLenders  == 2)
+      assertMsg "Proposed new limit captured" (r.proposedNewLimit == Some 150_000_000.0)
+      assertMsg "Amendment type correct"      (r.amendmentType == IncreaseCreditLimit)
+
+  return ()
+
+-- ---------------------------------------------------------------------------
+-- | testAmendmentMajorityWithRejection
+--
+-- Validates ExtendMaturity amendment where one lender rejects but majority
+-- still passes (2 accept, 1 rejects in a 3-lender syndicate):
+--   1. 3-lender syndicate: AlphaBank, BetaBank, GammaBank
+--   2. ExtendMaturity proposal (requires strict majority: >50%)
+--   3. AlphaBank accepts, BetaBank rejects, GammaBank accepts
+--   4. 2/3 > 50% → majority met → agent executes
+-- ---------------------------------------------------------------------------
+testAmendmentMajorityWithRejection : Script ()
+testAmendmentMajorityWithRejection = script do
+
+  borrower  <- allocatePartyWithHint "BorrowerCorp10"  (PartyIdHint "BORROWER10")
+  agent     <- allocatePartyWithHint "AgentBank10"     (PartyIdHint "AGENT10")
+  bankA     <- allocatePartyWithHint "AlphaBank10"     (PartyIdHint "BANK_A10")
+  bankB     <- allocatePartyWithHint "BetaBank10"      (PartyIdHint "BANK_B10")
+  gammaBank <- allocatePartyWithHint "GammaBank10"     (PartyIdHint "BANK_G10")
+
+  proposalCid <- submitMulti [borrower, agent] [] do
+    createCmd FacilityAmendmentProposal with
+      facilityId          = "FAC-2026-USD-200M"
+      proposalId          = "AMEND-FAC-2026-002"
+      borrower            = borrower
+      agent               = agent
+      lenders             = [bankA, bankB, gammaBank]
+      amendmentType       = ExtendMaturity
+      proposedNewLimit    = None
+      proposedNewMaturity = Some (date 2029 Dec 31)
+      newLender           = None
+      removedLender       = None
+      rationale           = "Extend facility maturity from Dec 2027 to Dec 2029 \
+                            \to align with borrower's long-term capital plan."
+      proposalDate        = date 2026 Oct 1
+      expiryDate          = date 2026 Oct 31
+      acceptedBy          = []
+      rejectedBy          = []
+
+  -- AlphaBank and GammaBank accept; BetaBank rejects
+  afterBankACid  <- submit bankA     do exerciseCmd proposalCid  AcceptAmendment with lender = bankA
+  afterBankBCid  <- submit bankB     do exerciseCmd afterBankACid RejectAmendment with lender = bankB
+  afterGammaCid  <- submit gammaBank do exerciseCmd afterBankBCid AcceptAmendment with lender = gammaBank
+
+  -- Verify state: acceptedBy=[bankA, gammaBank], rejectedBy=[bankB]
+  state <- queryContractId agent afterGammaCid
+  case state of
+    None -> assertFail "Proposal contract not found"
+    Some p -> do
+      assertMsg "Should have 2 acceptances" (length p.acceptedBy == 2)
+      assertMsg "Should have 1 rejection"   (length p.rejectedBy == 1)
+
+  -- 2/3 acceptances → 2*2=4 > 3 → strict majority met → can execute
+  recordCid <- submit agent do
+    exerciseCmd afterGammaCid ExecuteAmendment with
+      executionDate = date 2026 Oct 20
+
+  record <- queryContractId agent recordCid
+  case record of
+    None -> assertFail "Amendment record not found"
+    Some r -> do
+      assertMsg "Record has 2 accepted"         (r.acceptedCount == 2)
+      assertMsg "Proposed maturity captured"    (r.proposedNewMaturity == Some (date 2029 Dec 31))
+      assertMsg "Rejected lender list correct"  (length r.rejectedBy == 1)
+
+  -- Guard: double-vote rejected
+  doubleVote <- tryToEither $ submit bankA do
+    exerciseCmd proposalCid AcceptAmendment with lender = bankA
+  case doubleVote of
+    Left  _ -> return ()  -- Expected: proposalCid is archived
+    Right _ -> assertFail "Cannot vote on archived proposal"
+
+  return ()
+
+-- ---------------------------------------------------------------------------
+-- | testAmendmentLapse
+--
+-- Validates that a proposal can be lapsed after its expiry date,
+-- and that execution after expiry is blocked.
+-- ---------------------------------------------------------------------------
+testAmendmentLapse : Script ()
+testAmendmentLapse = script do
+
+  borrower <- allocatePartyWithHint "BorrowerCorp11"  (PartyIdHint "BORROWER11")
+  agent    <- allocatePartyWithHint "AgentBank11"     (PartyIdHint "AGENT11")
+  bankA    <- allocatePartyWithHint "AlphaBank11"     (PartyIdHint "BANK_A11")
+
+  proposalCid <- submitMulti [borrower, agent] [] do
+    createCmd FacilityAmendmentProposal with
+      facilityId          = "FAC-2026-USD-50M"
+      proposalId          = "AMEND-FAC-2026-003"
+      borrower            = borrower
+      agent               = agent
+      lenders             = [bankA]
+      amendmentType       = ReduceCreditLimit
+      proposedNewLimit    = Some 40_000_000.0
+      proposedNewMaturity = None
+      newLender           = None
+      removedLender       = None
+      rationale           = "Borrower elects to reduce undrawn capacity to \
+                            \lower commitment fees."
+      proposalDate        = date 2026 Nov 1
+      expiryDate          = date 2026 Nov 15
+      acceptedBy          = []
+      rejectedBy          = []
+
+  -- Guard: cannot execute after expiry (Nov 15 is deadline; Nov 20 > expiry)
+  lateExec <- tryToEither $ submit agent do
+    exerciseCmd proposalCid ExecuteAmendment with
+      executionDate = date 2026 Nov 20
+  case lateExec of
+    Left  _ -> return ()  -- Expected: executionDate > expiryDate blocked
+    Right _ -> assertFail "Execution after expiry date should be rejected"
+
+  -- Agent lapses the expired proposal
+  submit agent do
+    exerciseCmd proposalCid LapseProposal with
+      lapseDate = date 2026 Nov 20
+
+  -- Verify proposal is archived (cannot be exercised again)
+  lapsedAgain <- tryToEither $ submit agent do
+    exerciseCmd proposalCid LapseProposal with lapseDate = date 2026 Nov 21
+  case lapsedAgain of
+    Left  _ -> return ()  -- Expected: already archived
+    Right _ -> assertFail "Cannot lapse an already-archived proposal"
+
+  return ()

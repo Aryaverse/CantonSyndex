@@ -1,188 +1,144 @@
-# CantonSyndex API Reference
+# CantonSyndex — Complete API & Smart Contract Reference
 
-## DAML Templates
+This document provides complete technical specifications for all 12 DAML smart contracts, data structures, and REST API endpoints within the CantonSyndex ecosystem.
 
 ---
 
-### `CantonSyndex.Core.MasterFacility`
+## 1. DAML Smart Contracts (`CantonSyndex.Core`)
 
+### `MasterFacility`
 Global facility contract governing the aggregate syndicated loan.
-
-#### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `facilityId` | `Text` | Unique facility reference (e.g. `"FAC-2026-USD-100M"`) |
-| `borrower` | `Party` | Corporate or sovereign borrower |
-| `agent` | `Party` | Lead arranger / facility agent bank |
-| `currency` | `Text` | ISO 4217 currency code (e.g. `"USD"`) |
-| `totalLimit` | `Decimal` | Maximum aggregate credit commitment |
-| `drawnAmount` | `Decimal` | Current aggregate drawn amount |
-| `isActive` | `Bool` | Whether facility is open for drawdowns |
-| `regulator` | `Optional Party` | Read-only compliance observer |
-
-#### Invariants
-- `totalLimit > 0.0`
-- `drawnAmount >= 0.0`
-- `drawnAmount <= totalLimit`
-
-#### Choices
-
-##### `SyndicateTranche` (nonconsuming)
-- **Controller**: `agent`
-- **Args**: `lender: Party`, `commitmentAmount: Decimal`, `marginSpreadBps: Decimal`
-- **Returns**: `ContractId TrancheParticipation`
-- **Effect**: Creates a bilateral `TrancheParticipation` contract visible only to `agent` and `lender`
-
-##### `RequestDrawdown`
-- **Controller**: `borrower`
-- **Args**: `drawdownId: Text`, `amount: Decimal`
-- **Returns**: `(ContractId MasterFacility, ContractId DrawdownExecution)`
-- **Effect**: Archives old facility, creates updated facility with incremented `drawnAmount`, creates `DrawdownExecution` audit record
-
-##### `DeactivateFacility`
-- **Controller**: `agent`
-- **Args**: *(none)*
-- **Returns**: `ContractId MasterFacility`
-- **Effect**: Creates new facility with `isActive = False`
+- **Signatories:** `borrower`, `agent`
+- **Observers:** `optionalToList regulator`
+- **Fields:** `facilityId: Text`, `borrower: Party`, `agent: Party`, `currency: Text`, `totalLimit: Decimal`, `drawnAmount: Decimal`, `isActive: Bool`, `regulator: Optional Party`
+- **Choices:**
+  - `SyndicateTranche` (nonconsuming, `agent`): Provisions bilateral `TrancheParticipation`.
+  - `RequestDrawdown` (`borrower`): Increments aggregate `drawnAmount` and creates `DrawdownExecution`.
+  - `DeactivateFacility` (`agent`): Archives active contract and sets `isActive = False`.
 
 ---
 
-### `CantonSyndex.Core.TrancheParticipation`
-
+### `TrancheParticipation`
 Strict bilateral agreement between Lead Agent and a single participant lender.
-
-#### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `facilityId` | `Text` | Reference to parent MasterFacility |
-| `agent` | `Party` | Lead Arranger |
-| `borrower` | `Party` | Borrower (not a signatory — stored for context) |
-| `lender` | `Party` | This specific participant bank |
-| `commitmentAmount` | `Decimal` | Maximum this lender has agreed to fund |
-| `drawnAmount` | `Decimal` | Currently drawn from this lender's commitment |
-| `marginSpreadBps` | `Decimal` | Bilaterally negotiated margin in basis points |
-| `isActive` | `Bool` | Whether tranche is open for drawdowns |
-
-#### Invariants
-- `commitmentAmount > 0.0`
-- `drawnAmount >= 0.0`
-- `drawnAmount <= commitmentAmount`
-
-#### Choices
-
-##### `ApplyTrancheDrawdown`
-- **Controller**: `agent`
-- **Args**: `drawAmount: Decimal`
-- **Returns**: `ContractId TrancheParticipation`
-- **Effect**: Increments `drawnAmount` by `drawAmount`
-
-##### `SettleRepayment`
-- **Controller**: `agent`
-- **Args**: `principalPaid: Decimal`, `interestPaid: Decimal`, `timestamp: Text`
-- **Returns**: `(ContractId TrancheParticipation, ContractId RepaymentReceipt)`
-- **Effect**: Decrements `drawnAmount`, creates immutable `RepaymentReceipt`
-
-##### `SuspendTranche`
-- **Controller**: `agent`
-- **Args**: *(none)*
-- **Returns**: `ContractId TrancheParticipation`
-- **Effect**: Sets `isActive = False`
+- **Signatories:** `agent`, `lender`
+- **Observers:** None (Enforces Canton sub-transaction privacy).
+- **Fields:** `facilityId: Text`, `agent: Party`, `borrower: Party`, `lender: Party`, `commitmentAmount: Decimal`, `drawnAmount: Decimal`, `marginSpreadBps: Decimal`, `isActive: Bool`
+- **Choices:**
+  - `ApplyTrancheDrawdown` (`agent`): Increases `drawnAmount`.
+  - `SettleRepayment` (`agent`): Decreases `drawnAmount` and creates `RepaymentReceipt`.
+  - `SuspendTranche` (`agent`): Suspends tranche operations.
 
 ---
 
-### `CantonSyndex.Core.DrawdownExecution`
-
-Immutable audit record of a borrower drawdown event.
-
-#### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `facilityId` | `Text` | Reference to parent MasterFacility |
-| `drawdownId` | `Text` | Unique drawdown reference |
-| `borrower` | `Party` | Borrower who triggered the drawdown |
-| `agent` | `Party` | Lead Agent responsible for distribution |
-| `amount` | `Decimal` | Total drawdown amount |
-| `executed` | `Bool` | Whether agent has distributed to all tranches |
-
-#### Invariants
-- `amount > 0.0`
-
-#### Choices
-
-##### `MarkDrawdownExecuted`
-- **Controller**: `agent`
-- **Args**: *(none)*
-- **Returns**: `ContractId DrawdownExecution`
-- **Effect**: Sets `executed = True`
+### `InterestAccrual`
+Tracks period interest accumulation across different day-count conventions.
+- **Signatories:** `agent`, `lender`
+- **Fields:** `facilityId: Text`, `trancheId: Text`, `agent: Party`, `lender: Party`, `principalBalance: Decimal`, `marginSpreadBps: Decimal`, `baseRateBps: Decimal`, `periodStartDate: Date`, `periodEndDate: Date`, `dayCountConvention: DayCountConvention`, `accruedInterest: Decimal`, `isSettled: Bool`
+- **Choices:**
+  - `AccrueInterest` (`agent`): Calculates interest up to `accrualDate` via `Actual365Fixed`, `Actual360`, or `Thirty360`.
+  - `CollectInterest` (`agent`): Settles interest and creates `InterestPaymentReceipt`.
+  - `AdjustPrincipal` (`agent`): Updates principal balance following mid-period drawdowns/repayments.
 
 ---
 
-### `CantonSyndex.Core.RepaymentReceipt`
-
-Immutable, lender-specific settlement confirmation.
-
-#### Fields
-
-| Field | Type | Description |
-|---|---|---|
-| `facilityId` | `Text` | Reference to parent MasterFacility |
-| `agent` | `Party` | Lead Agent who processed the repayment |
-| `lender` | `Party` | Participant lender receiving the confirmation |
-| `principalPaid` | `Decimal` | Principal amount repaid |
-| `interestPaid` | `Decimal` | Interest amount paid |
-| `timestamp` | `Text` | ISO-8601 settlement timestamp |
-
-#### Invariants
-- `principalPaid >= 0.0`
-- `interestPaid >= 0.0`
-
-#### Signatories / Observers
-- **Signatory**: `agent`
-- **Observer**: `lender` (read-only — lender cannot modify)
+### `InterestPaymentReceipt`
+Immutable audit record of an interest settlement.
+- **Signatory:** `agent`
+- **Observer:** `lender`
+- **Fields:** `facilityId`, `trancheId`, `agent`, `lender`, `principalBalance`, `accruedInterest`, `marginSpreadBps`, `baseRateBps`, `dayCountConvention`, `periodStartDate`, `periodEndDate`, `settlementDate`
 
 ---
 
-## TypeScript Bridge API
+### `CommitmentFeeAccrual`
+Calculates fees owed to lenders on the undrawn portion of their credit commitments.
+- **Signatories:** `agent`, `lender`
+- **Fields:** `facilityId: Text`, `trancheId: Text`, `agent: Party`, `lender: Party`, `commitmentAmount: Decimal`, `drawnAmount: Decimal`, `feeBps: Decimal`, `periodStartDate: Date`, `periodEndDate: Date`, `accruedFee: Decimal`, `isSettled: Bool`
+- **Choices:**
+  - `AccrueCommitmentFee` (`agent`): Computes fee on `(commitmentAmount - drawnAmount)`.
+  - `AdjustDrawnAmount` (`agent`): Resets accrual timer on mid-period draw/repay.
+  - `CollectCommitmentFee` (`agent`): Generates `CommitmentFeeReceipt`.
 
-### `SyndexLedgerBridge`
+---
 
-```typescript
-const bridge = new SyndexLedgerBridge(
-  participantEndpoint: string,  // Canton Participant Node URL
-  authToken: string,             // Canton JWT token
-  applicationId?: string         // Default: "CantonSyndex-Bridge"
-);
-```
+### `CommitmentFeeReceipt`
+Immutable record of paid commitment fees.
+- **Signatory:** `agent`
+- **Observer:** `lender`
+- **Fields:** `facilityId`, `trancheId`, `agent`, `lender`, `commitmentAmount`, `averageUndrawnAmount`, `feeBps`, `accruedFee`, `periodStartDate`, `periodEndDate`, `settlementDate`
 
-#### Methods
+---
 
-| Method | Args | Returns | Description |
+### `FacilityCovenants`
+Authoritative on-ledger financial covenant monitoring engine.
+- **Signatories:** `borrower`, `agent`
+- **Observers:** `lenders ++ optionalToList regulator`
+- **Fields:** `facilityId`, `borrower`, `agent`, `lenders: [Party]`, `regulator: Optional Party`, `maxLeverageRatio: Decimal`, `minDSCR: Decimal`, `maxLTV: Decimal`, `minLiquidity: Decimal`, `lastTestDate: Date`, `leverageActual: Decimal`, `dscrActual: Decimal`, `ltvActual: Decimal`, `liquidityActual: Decimal`, `breachStatus: CovenantBreachStatus`, `curePeriodDays: Int`
+- **Choices:**
+  - `TestCovenant` (`agent`): Evaluates all 4 ratios atomically; sets `Compliant` or `Breached`.
+  - `WaiveCovenantBreach` (`agent`): Grants formal waiver, setting status to `WaivedByAgent`.
+  - `AccelerateOnBreach` (`agent`): Declares loan default and creates `CovenantBreachNotice`.
+
+---
+
+### `CovenantBreachNotice`
+Permanent, observable acceleration audit notice for all syndicate participants.
+- **Signatory:** `agent`
+- **Observers:** `[borrower] ++ lenders ++ optionalToList regulator`
+- **Fields:** `facilityId`, `borrower`, `agent`, `lenders`, `regulator`, `accelerationDate`, `leverageAtBreach`, `dscrAtBreach`, `ltvAtBreach`, `liquidityAtBreach`, `noticeText`
+
+---
+
+### `FacilityAmendmentProposal`
+Multi-party governance workflow for modifying credit agreements.
+- **Signatories:** `borrower`, `agent`
+- **Observers:** `lenders`
+- **Fields:** `facilityId`, `proposalId`, `borrower`, `agent`, `lenders: [Party]`, `amendmentType: AmendmentType`, `proposedNewLimit: Optional Decimal`, `proposedNewMaturity: Optional Date`, `newLender: Optional Party`, `removedLender: Optional Party`, `rationale: Text`, `proposalDate: Date`, `expiryDate: Date`, `acceptedBy: [Party]`, `rejectedBy: [Party]`
+- **Choices:**
+  - `AcceptAmendment` (`lender`): Records lender assent.
+  - `RejectAmendment` (`lender`): Records lender dissent.
+  - `ExecuteAmendment` (`agent`): Verifies voting threshold (unanimous for limit/currency; strict majority for others) and outputs `FacilityAmendmentRecord`.
+  - `LapseProposal` (`agent`): Archives expired unapproved proposals.
+
+---
+
+### `FacilityAmendmentRecord`
+Immutable ledger record of an approved facility amendment.
+- **Signatory:** `agent`
+- **Observers:** `[borrower] ++ lenders`
+- **Fields:** `facilityId`, `proposalId`, `borrower`, `agent`, `lenders`, `amendmentType`, `proposedNewLimit`, `proposedNewMaturity`, `newLender`, `removedLender`, `rationale`, `proposalDate`, `executionDate`, `acceptedBy`, `rejectedBy`, `totalLenders`, `acceptedCount`
+
+---
+
+### `DrawdownExecution`
+Immutable audit trail of loan utilization.
+- **Signatories:** `borrower`, `agent`
+- **Fields:** `facilityId: Text`, `drawdownId: Text`, `borrower: Party`, `agent: Party`, `amount: Decimal`, `timestamp: Text`
+
+---
+
+### `RepaymentReceipt`
+Immutable confirmation of repayment settlement.
+- **Signatory:** `agent`
+- **Observer:** `lender`
+- **Fields:** `facilityId: Text`, `trancheId: Text`, `agent: Party`, `lender: Party`, `principalPaid: Decimal`, `interestPaid: Decimal`, `timestamp: Text`
+
+---
+
+## 2. REST API Specification
+
+| Method | Endpoint | Description | Query / Body Parameters |
 |---|---|---|---|
-| `createMasterFacility` | `actAs`, `payload` | `CommandResult` | Create facility (multi-party) |
-| `allocateTranche` | `cid`, `agent`, `args` | `CommandResult` | SyndicateTranche choice |
-| `requestDrawdown` | `cid`, `borrower`, `args` | `CommandResult` | RequestDrawdown choice |
-| `applyTrancheDrawdown` | `cid`, `agent`, `args` | `CommandResult` | ApplyTrancheDrawdown choice |
-| `settleRepayment` | `cid`, `agent`, `args` | `CommandResult` | SettleRepayment choice |
-| `streamPositions` | `party`, `onUpdate`, `onError?` | `() => void` | Real-time ACS stream |
-| `streamRepaymentReceipts` | `party`, `onUpdate`, `onError?` | `() => void` | Receipt stream |
-| `queryFacility` | `party`, `facilityId` | `ActiveContract \| null` | Query facility |
-| `subscribeToEvents` | `party`, `onEvent`, `onError?` | `() => void` | Aggregate event subscription |
-
----
-
-## Types Module
-
-### `CantonSyndex.Types`
-
-```daml
-calculateInterest : Decimal -> BasisPoints -> Int -> Decimal
-```
-Computes interest using actual/365 day-count convention.
-
-```daml
-calculateProRataShare : Decimal -> Decimal -> Decimal -> Decimal
-```
-Computes `(lenderCommitment / totalCommitment) * totalAmount`.
+| `GET` | `/api/health` | Service health & participant node status | None |
+| `GET` | `/api/facility` | Query Master Facility details & headroom | `facilityId` (query) |
+| `GET` | `/api/tranches` | Query visible tranches for active party | `facilityId` (query, optional) |
+| `POST` | `/api/drawdown` | Request & execute borrower drawdown | `{ facilityCid, borrowerParty, amount, drawdownId }` |
+| `POST` | `/api/repay` | Settle principal & interest for a tranche | `{ trancheCid, principalPaid, interestPaid, timestamp }` |
+| `POST` | `/api/interest/accrue` | Accrue interest on a tranche contract | `{ accrualCid, accrualDate }` |
+| `POST` | `/api/interest/collect` | Collect & settle accrued interest | `{ accrualCid, settlementDate }` |
+| `GET` | `/api/interest/receipts`| List all interest payment receipts | `facilityId` (query, optional) |
+| `GET` | `/api/covenants` | Query current facility covenant status | `facilityId` (query) |
+| `POST` | `/api/covenants/test` | Submit quarterly compliance certificate | `{ covenantCid, testDate, newLeverage, newDSCR, newLTV, newLiquidity }` |
+| `POST` | `/api/fees/accrue` | Accrue undrawn commitment fee | `{ feeCid, accrualDate }` |
+| `POST` | `/api/fees/collect` | Settle & collect commitment fees | `{ feeCid, settlementDate }` |
+| `POST` | `/api/amendments/vote` | Cast lender vote on proposed amendment | `{ proposalCid, lenderParty }` |
+| `POST` | `/api/amendments/execute`| Execute amendment upon threshold met | `{ proposalCid, executionDate }` |

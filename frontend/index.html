@@ -12,6 +12,86 @@
 </head>
 <body>
 
+  <!-- ===== LOGIN SCREEN ===== -->
+  <div class="login-overlay" id="login-overlay" role="dialog" aria-modal="true" aria-labelledby="login-title">
+    <div class="login-card">
+      <div class="login-logo">
+        <svg width="48" height="48" viewBox="0 0 32 32" fill="none">
+          <polygon points="16,2 30,10 30,22 16,30 2,22 2,10" fill="url(#llGrad)" stroke="rgba(139,92,246,0.4)" stroke-width="1"/>
+          <polygon points="16,8 24,13 24,19 16,24 8,19 8,13" fill="none" stroke="rgba(139,92,246,0.6)" stroke-width="1"/>
+          <circle cx="16" cy="16" r="3" fill="url(#llGrad2)"/>
+          <defs>
+            <linearGradient id="llGrad" x1="0" y1="0" x2="32" y2="32">
+              <stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/>
+            </linearGradient>
+            <linearGradient id="llGrad2" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#c4b5fd"/><stop offset="100%" stop-color="#67e8f9"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h1 class="login-title" id="login-title">CantonSyndex</h1>
+      <p class="login-sub">Privacy-Preserving Syndicated Loan Platform</p>
+      <p class="login-desc">Select your institution and enter your Canton JWT token to authenticate your party session.</p>
+
+      <div class="login-error" id="login-error" role="alert" aria-live="polite" style="display:none"></div>
+
+      <form class="login-form" id="login-form" novalidate>
+        <div class="login-field">
+          <label for="login-party-select">Institution / Party</label>
+          <select id="login-party-select" class="login-input" required aria-required="true">
+            <option value="">— Select your institution —</option>
+            <option value="agent">🏦 GlobalLeadBank (Agent / Arranger)</option>
+            <option value="borrower">🏢 BorrowerCorp (Obligor)</option>
+            <option value="bankA">🏛️ AlphaBank (Senior Lender A)</option>
+            <option value="bankB">🏛️ BetaBank (Senior Lender B)</option>
+            <option value="regulator">🔍 CentralBank (Regulator / Observer)</option>
+          </select>
+        </div>
+
+        <div class="login-field">
+          <label for="login-jwt-input">Canton JWT Token</label>
+          <div class="login-token-wrap">
+            <input
+              type="password"
+              id="login-jwt-input"
+              class="login-input"
+              placeholder="eyJhbGciOiJSUzI1NiIsInR5cCI6..."
+              autocomplete="off"
+              spellcheck="false"
+              aria-describedby="login-token-hint"
+            />
+            <button type="button" class="token-eye-btn" id="token-eye-btn" aria-label="Show/hide token">
+              <svg id="eye-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+          <p class="login-token-hint" id="login-token-hint">
+            Use <code>local-dev-jwt</code> for Sandbox mode or paste your Canton Ledger API token for Live mode.
+          </p>
+        </div>
+
+        <div class="login-field">
+          <label for="login-mode-select">Network Mode</label>
+          <select id="login-mode-select" class="login-input" aria-label="Select network mode">
+            <option value="simulated">⚡ Interactive Sandbox (Demo)</option>
+            <option value="live-local">🔗 Canton LocalNet (Live JSON API)</option>
+          </select>
+        </div>
+
+        <button type="submit" class="login-btn" id="login-submit-btn">
+          <span class="login-btn-text">Authenticate &amp; Enter Dashboard</span>
+          <span class="login-btn-spinner" id="login-spinner" aria-hidden="true"></span>
+        </button>
+      </form>
+
+      <div class="login-demo-hint">
+        <span>Demo? Use party <strong>GlobalLeadBank</strong> · token <code>local-dev-jwt</code></span>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== HEADER ===== -->
   <header class="header" role="banner">
     <div class="header-inner">
@@ -74,9 +154,46 @@
           <span class="status-dot" aria-hidden="true"></span>
           <span id="ledger-status-text">Canton Ledger</span>
         </div>
+        <div class="session-chip" id="session-chip" aria-label="Active session">
+          <span class="session-avatar" id="session-avatar">G</span>
+          <span class="session-name" id="session-name">GlobalLeadBank</span>
+        </div>
+        <button class="logout-btn" id="logout-btn" aria-label="Sign out of session" title="Sign out">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16 17 21 12 16 7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          Sign Out
+        </button>
       </div>
     </div>
   </header>
+
+  <!-- ===== TOAST NOTIFICATION CONTAINER (WebSocket push alerts) ===== -->
+  <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="false" role="region" aria-label="Real-time alerts"></div>
+
+  <!-- ===== ERROR MODAL (DAML assertion errors → user readable messages) ===== -->
+  <div class="error-modal-overlay" id="error-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="error-modal-title" style="display:none">
+    <div class="error-modal-card">
+      <div class="error-modal-icon" aria-hidden="true">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+      </div>
+      <h2 class="error-modal-title" id="error-modal-title">Transaction Failed</h2>
+      <p class="error-modal-message" id="error-modal-message">An unexpected error occurred.</p>
+      <div class="error-modal-detail-wrap" id="error-modal-detail-wrap" style="display:none">
+        <button class="error-detail-toggle" id="error-detail-toggle" aria-expanded="false">Show technical detail ▼</button>
+        <pre class="error-modal-detail" id="error-modal-detail"></pre>
+      </div>
+      <div class="error-modal-actions">
+        <button class="error-modal-close-btn" id="error-modal-close-btn">Dismiss</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ===== MAIN ===== -->
   <main class="main" role="main">

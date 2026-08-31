@@ -3,9 +3,12 @@
  * Comprehensive Operations Controller for Privacy-Preserving Syndicated Loans on Canton Network.
  *
  * Supports:
- * - Live Canton JSON API mode (direct gRPC/HTTP proxy to nodes: 10013, 10023, 10033)
+ * - JWT per-party authentication with token storage and session management
+ * - Live Canton JSON API mode with real-time ACS streaming (gRPC/HTTP proxy)
  * - Interactive Sandbox mode (high-fidelity on-chain state machine simulation)
  * - Bilateral sub-transaction privacy enforcement per party view
+ * - WebSocket real-time push notifications (covenant breach, amendments, accruals)
+ * - DAML assertion error translation to user-friendly messages
  * - Full template suite: MasterFacility, TrancheParticipation, DrawdownExecution,
  *   InterestAccrual, CommitmentFeeAccrual, FacilityCovenants, FacilityAmendmentProposal,
  *   RepaymentReceipt, and CovenantBreachNotice.
@@ -27,6 +30,9 @@ const CANTON_ENDPOINTS = {
 
 let networkMode = 'simulated'; // 'simulated' | 'live-local'
 let activeParty = 'agent';
+let sessionToken = null;       // JWT token for current party
+let acsPollingInterval = null; // ACS streaming poll handle
+let wsConnection = null;       // WebSocket notification hub
 
 // High-fidelity state machine representing on-ledger contracts
 const state = {
@@ -225,15 +231,39 @@ const fmtTime = ts => {
   } catch { return ts; }
 };
 
-const toast = (message, type = 'info') => {
+// Icon SVGs for toasts
+const TOAST_ICONS = {
+  info:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="8"/><line x1="12" y1="12" x2="12" y2="16"/></svg>',
+  success: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>',
+  warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  error:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+};
+
+const toast = (title, message = '', type = 'info', duration = 5000) => {
   const container = document.getElementById('toast-container');
   if (!container) return;
+  // Support legacy single-string call
+  if (!message && typeof title === 'string' && !['info','success','warning','error'].includes(message)) {
+    message = title; title = type === 'error' ? 'Error' : type === 'success' ? 'Success' : type === 'warning' ? 'Warning' : 'Notice';
+  }
   const el = document.createElement('div');
-  el.className = `toast toast--${type}`;
-  const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : type === 'warning' ? '⚠' : 'ℹ';
-  el.innerHTML = `<span style="font-size:1.1rem; font-weight:700;">${icon}</span><span>${message}</span>`;
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `
+    <span class="toast-icon">${TOAST_ICONS[type] || TOAST_ICONS.info}</span>
+    <div class="toast-body">
+      <p class="toast-title">${title}</p>
+      ${message ? `<p class="toast-msg">${message}</p>` : ''}
+    </div>
+    <button class="toast-close" aria-label="Dismiss">&times;</button>
+  `;
+  const close = el.querySelector('.toast-close');
+  const dismiss = () => {
+    el.classList.add('toast-exit');
+    setTimeout(() => el.remove(), 280);
+  };
+  close.addEventListener('click', dismiss);
   container.appendChild(el);
-  setTimeout(() => el.remove(), 4500);
+  setTimeout(dismiss, duration);
 };
 
 const logAudit = (type, title, detail, color = '#8b5cf6') => {
@@ -281,25 +311,75 @@ const getVisibleFeeContracts = () => {
 };
 
 // =============================================================================
-// LIVE CANTON JSON API CLIENT
+// DAML ERROR TRANSLATOR — maps assertion messages to friendly UI text
+// =============================================================================
+
+const DAML_ERROR_MAP = [
+  { pattern: /DA.Exception.AssertionFailed/i,                              friendly: 'A DAML contract assertion was violated. Check your input values against contract invariants.' },
+  { pattern: /Unauthorized/i,                                              friendly: 'Your party does not have authorization to perform this action. Check your JWT token and party role.' },
+  { pattern: /Contract not found/i,                                        friendly: 'The target contract could not be found. It may have already been archived or the contract ID is invalid.' },
+  { pattern: /exceeds.*limit|limit.*exceeded/i,                            friendly: 'The requested amount exceeds the facility credit limit. Please check outstanding drawdowns and headroom.' },
+  { pattern: /drawdown.*zero|zero.*drawdown/i,                             friendly: 'Drawdown amount must be greater than zero.' },
+  { pattern: /repayment.*exceeds|exceeds.*principal/i,                     friendly: 'Repayment amount exceeds the outstanding drawn principal on this tranche.' },
+  { pattern: /covenant.*breach|breach.*covenant/i,                         friendly: 'A covenant ratio test has failed. The borrower is in breach. Refer to the Covenants tab for detail.' },
+  { pattern: /amendment.*lapsed|proposal.*expired/i,                       friendly: 'This amendment proposal has lapsed. The voting deadline has passed without unanimous consent.' },
+  { pattern: /already.*voted|duplicate.*accept/i,                          friendly: 'This lender has already voted on the amendment proposal.' },
+  { pattern: /HTTP 401|unauthorized/i,                                     friendly: 'Authentication failed. Your JWT token may be expired or invalid. Please sign in again.' },
+  { pattern: /HTTP 403|forbidden/i,                                        friendly: 'Access denied. Your party does not have permission to view or modify this contract.' },
+  { pattern: /ECONNREFUSED|Failed to fetch|NetworkError|net::ERR/i,        friendly: 'Cannot reach the Canton ledger node. Ensure the Canton LocalNet is running and accessible.' },
+];
+
+const translateDamlError = (rawError) => {
+  const raw = String(rawError?.message || rawError || '');
+  for (const { pattern, friendly } of DAML_ERROR_MAP) {
+    if (pattern.test(raw)) return { friendly, raw };
+  }
+  return { friendly: 'An unexpected ledger error occurred. Please check your inputs and try again.', raw };
+};
+
+const showErrorModal = (error, context = '') => {
+  const { friendly, raw } = translateDamlError(error);
+  const overlay = document.getElementById('error-modal-overlay');
+  const msgEl   = document.getElementById('error-modal-message');
+  const detailEl = document.getElementById('error-modal-detail');
+  const detailWrap = document.getElementById('error-modal-detail-wrap');
+  const titleEl = document.getElementById('error-modal-title');
+
+  titleEl.textContent  = context ? `Transaction Failed — ${context}` : 'Transaction Failed';
+  msgEl.textContent    = friendly;
+  detailEl.textContent = raw;
+  detailWrap.style.display = raw ? 'block' : 'none';
+  overlay.style.display = 'flex';
+};
+
+// =============================================================================
+// LIVE CANTON JSON API CLIENT (with JWT auth headers & error translation)
 // =============================================================================
 
 const cantonApi = {
+  _headers() {
+    const h = { 'Content-Type': 'application/json' };
+    if (sessionToken) h['Authorization'] = `Bearer ${sessionToken}`;
+    return h;
+  },
+
   async queryContracts(templateId) {
     if (networkMode === 'simulated') return null;
     const endpoint = CANTON_ENDPOINTS[activeParty] || CANTON_ENDPOINTS.agent;
     try {
       const res = await fetch(`${endpoint}/v1/query`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this._headers(),
         body: JSON.stringify({ templateIds: [templateId] }),
       });
+      if (res.status === 401) { auth.logout(); throw new Error('HTTP 401 unauthorized'); }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       return data.result || [];
     } catch (err) {
       console.warn(`[Canton API] Query failed:`, err);
-      toast(`Canton node at ${endpoint} offline. Falling back to sandbox state.`, 'warning');
+      const { friendly } = translateDamlError(err);
+      toast('Canton Node Offline', friendly, 'warning');
       return null;
     }
   },
@@ -310,16 +390,291 @@ const cantonApi = {
     try {
       const res = await fetch(`${endpoint}/v1/exercise`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this._headers(),
         body: JSON.stringify({ templateId, contractId, choice, argument }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (res.status === 401) { auth.logout(); throw new Error('HTTP 401 unauthorized'); }
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || errBody.message || `HTTP ${res.status}`);
+      }
       return await res.json();
     } catch (err) {
       console.warn(`[Canton API] Exercise failed:`, err);
+      showErrorModal(err, choice);
       throw err;
     }
   },
+};
+
+// =============================================================================
+// JWT AUTHENTICATION MODULE
+// =============================================================================
+
+const PARTY_DISPLAY_NAMES = {
+  agent:     { name: 'GlobalLeadBank', role: 'Agent', avatar: 'G' },
+  borrower:  { name: 'BorrowerCorp',  role: 'Borrower', avatar: 'B' },
+  bankA:     { name: 'AlphaBank',     role: 'Lender A', avatar: 'A' },
+  bankB:     { name: 'BetaBank',      role: 'Lender B', avatar: 'β' },
+  regulator: { name: 'CentralBank',   role: 'Regulator', avatar: 'R' },
+};
+
+const auth = {
+  // Validate and store JWT session
+  login(party, token, mode) {
+    if (!party) throw new Error('Please select your institution.');
+    if (!token || token.trim().length < 8) throw new Error('Please enter a valid Canton JWT token.');
+
+    // Store session
+    sessionToken = token.trim();
+    activeParty = party;
+    networkMode = mode || 'simulated';
+
+    // Persist to sessionStorage for page reload resilience
+    sessionStorage.setItem('syndex_party', party);
+    sessionStorage.setItem('syndex_token', token.trim());
+    sessionStorage.setItem('syndex_mode', networkMode);
+
+    this._applySession();
+  },
+
+  // Restore session from storage
+  restore() {
+    const party = sessionStorage.getItem('syndex_party');
+    const token = sessionStorage.getItem('syndex_token');
+    const mode  = sessionStorage.getItem('syndex_mode') || 'simulated';
+    if (party && token) {
+      sessionToken = token;
+      activeParty = party;
+      networkMode = mode;
+      this._applySession();
+      return true;
+    }
+    return false;
+  },
+
+  logout() {
+    sessionToken = null;
+    sessionStorage.removeItem('syndex_party');
+    sessionStorage.removeItem('syndex_token');
+    sessionStorage.removeItem('syndex_mode');
+    stopAcsStreaming();
+    stopWebSocket();
+    // Show login screen
+    const overlay = document.getElementById('login-overlay');
+    if (overlay) overlay.classList.remove('hidden');
+    const errEl = document.getElementById('login-error');
+    if (errEl) errEl.style.display = 'none';
+    toast('Session', 'You have been signed out successfully.', 'info');
+  },
+
+  _applySession() {
+    // Hide login screen
+    const overlay = document.getElementById('login-overlay');
+    if (overlay) overlay.classList.add('hidden');
+
+    // Update party selector in header
+    const partySelect = document.getElementById('party-select');
+    if (partySelect) partySelect.value = activeParty;
+
+    // Update network mode selector
+    const modeSelect = document.getElementById('network-mode-select');
+    if (modeSelect) modeSelect.value = networkMode;
+
+    // Update session chip
+    const info = PARTY_DISPLAY_NAMES[activeParty] || { name: activeParty, avatar: activeParty[0].toUpperCase() };
+    const avatarEl = document.getElementById('session-avatar');
+    const nameEl   = document.getElementById('session-name');
+    if (avatarEl) avatarEl.textContent = info.avatar;
+    if (nameEl)   nameEl.textContent   = `${info.name} (${info.role})`;
+
+    // Update ledger status
+    const statusText = document.getElementById('ledger-status-text');
+    if (statusText) {
+      statusText.textContent = networkMode === 'live-local' ? 'Canton LocalNet (Live)' : 'Interactive Sandbox';
+    }
+
+    // Boot streaming and dashboard
+    renderAll();
+    startAcsStreaming();
+    startWebSocket();
+    toast('Welcome', `Session active — ${info.name} (${info.role})`, 'success');
+  },
+};
+
+// =============================================================================
+// REAL-TIME ACS STREAMING (replaces 30s fixed poll)
+// =============================================================================
+
+const ACS_POLL_INTERVAL_LIVE = 8000;     // 8s in live mode
+const ACS_POLL_INTERVAL_SANDBOX = 30000; // 30s in sandbox mode
+
+const startAcsStreaming = () => {
+  stopAcsStreaming();
+  const interval = networkMode === 'live-local' ? ACS_POLL_INTERVAL_LIVE : ACS_POLL_INTERVAL_SANDBOX;
+
+  acsPollingInterval = setInterval(async () => {
+    if (networkMode !== 'live-local') { renderAll(); return; }
+
+    try {
+      // Poll MasterFacility ACS from live Canton node
+      const contracts = await cantonApi.queryContracts('CantonSyndex:Core:MasterFacility');
+      if (contracts && contracts.length > 0) {
+        const payload = contracts[0].payload;
+        if (payload) {
+          state.facility.totalLimit  = payload.totalCreditLimit ?? state.facility.totalLimit;
+          state.facility.isActive    = payload.isActive ?? state.facility.isActive;
+          state.facility.borrower    = payload.borrower ?? state.facility.borrower;
+        }
+        const statusDot = document.querySelector('#ledger-status .status-dot');
+        if (statusDot) statusDot.style.background = 'var(--clr-green)';
+      }
+
+      // Poll Covenant ACS for breach state changes
+      const covenantContracts = await cantonApi.queryContracts('CantonSyndex:Core:FacilityCovenants');
+      if (covenantContracts && covenantContracts.length > 0) {
+        const p = covenantContracts[0].payload;
+        if (p) {
+          state.covenants.leverageActual  = p.currentLeverage   ?? state.covenants.leverageActual;
+          state.covenants.dscrActual      = p.currentDSCR       ?? state.covenants.dscrActual;
+          state.covenants.ltvActual       = p.currentLTV        ?? state.covenants.ltvActual;
+          state.covenants.liquidityActual = p.currentLiquidity  ?? state.covenants.liquidityActual;
+          state.covenants.breachStatus    = p.breachStatus      ?? state.covenants.breachStatus;
+          // Push alert if breached
+          if (p.breachStatus === 'Breached') {
+            wsHub.pushAlert('covenant_breach', 'Covenant Breach Detected', `${state.facility.facilityId} — Covenant ratio test failed. Cure period: ${state.covenants.curePeriodDays} days.`);
+          }
+        }
+      }
+
+      renderAll();
+    } catch (err) {
+      console.warn('[ACS Stream] Poll error:', err);
+    }
+  }, interval);
+
+  console.log(`[ACS Stream] Started — polling every ${interval / 1000}s in ${networkMode} mode`);
+};
+
+const stopAcsStreaming = () => {
+  if (acsPollingInterval) { clearInterval(acsPollingInterval); acsPollingInterval = null; }
+};
+
+// =============================================================================
+// WEBSOCKET NOTIFICATION HUB (real-time push alerts)
+// =============================================================================
+
+const WS_RECONNECT_DELAY_MS = 5000;
+const WS_MAX_RECONNECTS = 8;
+let wsReconnectCount = 0;
+
+// Notification types pushed via WebSocket
+const WS_NOTIFICATION_HANDLERS = {
+  covenant_breach: (data) => {
+    toast('⚠️ Covenant Breach', data.message || 'A covenant ratio test has failed.', 'error', 8000);
+    logAudit('CovenantBreach', 'Covenant Breach Notification', data.message || 'Breach detected on-chain', '#ef4444');
+  },
+  amendment_vote: (data) => {
+    toast('🗳️ Amendment Vote', data.message || 'A lender has voted on an amendment proposal.', 'info');
+    logAudit('AmendmentVote', 'Amendment Vote Received', data.message || '', '#06b6d4');
+  },
+  amendment_executed: (data) => {
+    toast('✅ Amendment Executed', data.message || 'A facility amendment has been executed on-chain.', 'success');
+    logAudit('AmendmentExecuted', 'Amendment Executed', data.message || '', '#10b981');
+  },
+  interest_accrued: (data) => {
+    toast('Interest Accrued', data.message || 'A bilateral interest accrual has been recorded.', 'info', 4000);
+  },
+  fee_accrued: (data) => {
+    toast('Fee Accrued', data.message || 'A commitment fee has been accrued.', 'info', 4000);
+  },
+  ledger_connected: () => {
+    const dot = document.querySelector('#ledger-status .status-dot');
+    const txt = document.getElementById('ledger-status-text');
+    if (dot) dot.style.background = 'var(--clr-green)';
+    if (txt)  txt.textContent = 'Canton LocalNet (Live)';
+    toast('Ledger Connected', 'WebSocket channel established with Canton LocalNet.', 'success');
+  },
+  ledger_disconnected: () => {
+    const dot = document.querySelector('#ledger-status .status-dot');
+    if (dot) dot.style.background = 'var(--clr-red)';
+    toast('Ledger Disconnected', 'Connection to Canton node lost. Reconnecting…', 'warning');
+  },
+};
+
+// In-process push hub (used when no real WS server is available — simulates push in Sandbox)
+const wsHub = {
+  pushAlert(type, title, message) {
+    const handler = WS_NOTIFICATION_HANDLERS[type];
+    if (handler) handler({ title, message });
+  },
+  // Simulate periodic covenant check push in sandbox mode
+  startSandboxPush() {
+    // Simulated push: check for covenant near-breach every 45s
+    setInterval(() => {
+      if (networkMode !== 'simulated') return;
+      if (state.covenants.leverageActual > state.covenants.maxLeverageRatio * 0.9) {
+        wsHub.pushAlert('covenant_breach',
+          'Covenant Near-Breach Warning',
+          `Leverage ratio ${state.covenants.leverageActual.toFixed(2)}x approaching threshold of ${state.covenants.maxLeverageRatio}x.`);
+      }
+    }, 45000);
+  },
+};
+
+const startWebSocket = () => {
+  // In sandbox mode, use in-process push hub only
+  if (networkMode === 'simulated') {
+    wsHub.startSandboxPush();
+    return;
+  }
+
+  // In live mode, connect to the bridge server WebSocket endpoint
+  const wsUrl = `ws://localhost:3000/ws/notifications`;
+  try {
+    stopWebSocket();
+    wsConnection = new WebSocket(wsUrl);
+
+    wsConnection.onopen = () => {
+      wsReconnectCount = 0;
+      WS_NOTIFICATION_HANDLERS.ledger_connected?.();
+      // Send party subscription
+      wsConnection.send(JSON.stringify({ type: 'subscribe', party: activeParty, token: sessionToken }));
+    };
+
+    wsConnection.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        const handler = WS_NOTIFICATION_HANDLERS[msg.type];
+        if (handler) handler(msg);
+      } catch (e) { console.warn('[WS] Bad message:', e); }
+    };
+
+    wsConnection.onclose = () => {
+      WS_NOTIFICATION_HANDLERS.ledger_disconnected?.();
+      // Exponential backoff reconnect
+      if (wsReconnectCount < WS_MAX_RECONNECTS) {
+        const delay = WS_RECONNECT_DELAY_MS * Math.pow(1.5, wsReconnectCount);
+        wsReconnectCount++;
+        console.log(`[WS] Reconnecting in ${(delay/1000).toFixed(1)}s (attempt ${wsReconnectCount}/${WS_MAX_RECONNECTS})`);
+        setTimeout(startWebSocket, delay);
+      } else {
+        console.warn('[WS] Max reconnect attempts reached. Falling back to ACS polling only.');
+      }
+    };
+
+    wsConnection.onerror = (err) => { console.warn('[WS] Error:', err); };
+  } catch (err) {
+    console.warn('[WS] WebSocket unavailable, using polling only:', err);
+  }
+};
+
+const stopWebSocket = () => {
+  if (wsConnection) {
+    wsConnection.onclose = null; // prevent reconnect on manual close
+    wsConnection.close();
+    wsConnection = null;
+  }
 };
 
 // =============================================================================
@@ -1220,7 +1575,6 @@ const setupNavigation = () => {
 document.addEventListener('DOMContentLoaded', () => {
   setupNavigation();
   setupForms();
-  renderAll();
 
   // Set default form dates
   const today = new Date().toISOString().split('T')[0];
@@ -1229,4 +1583,111 @@ document.addEventListener('DOMContentLoaded', () => {
     const el = document.getElementById(id);
     if (el && !el.value) el.value = today;
   });
+
+  // ─── Error Modal dismiss ──────────────────────────────────────────────────
+  const errCloseBtn = document.getElementById('error-modal-close-btn');
+  if (errCloseBtn) {
+    errCloseBtn.addEventListener('click', () => {
+      document.getElementById('error-modal-overlay').style.display = 'none';
+    });
+  }
+  const errDetailToggle = document.getElementById('error-detail-toggle');
+  if (errDetailToggle) {
+    errDetailToggle.addEventListener('click', () => {
+      const detailEl = document.getElementById('error-modal-detail');
+      const expanded = errDetailToggle.getAttribute('aria-expanded') === 'true';
+      errDetailToggle.setAttribute('aria-expanded', String(!expanded));
+      errDetailToggle.textContent = expanded ? 'Show technical detail ▼' : 'Hide technical detail ▲';
+      detailEl.style.display = expanded ? 'none' : 'block';
+    });
+    // Initially hide detail pre
+    const detailEl = document.getElementById('error-modal-detail');
+    if (detailEl) detailEl.style.display = 'none';
+  }
+  // Close error modal on overlay click
+  const errOverlay = document.getElementById('error-modal-overlay');
+  if (errOverlay) {
+    errOverlay.addEventListener('click', (e) => {
+      if (e.target === errOverlay) errOverlay.style.display = 'none';
+    });
+  }
+
+  // ─── Login form handler ──────────────────────────────────────────────────
+  const loginForm = document.getElementById('login-form');
+  if (loginForm) {
+    loginForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const party  = document.getElementById('login-party-select').value;
+      const token  = document.getElementById('login-jwt-input').value;
+      const mode   = document.getElementById('login-mode-select').value;
+      const errEl  = document.getElementById('login-error');
+      const btn    = document.getElementById('login-submit-btn');
+      const spinner = document.getElementById('login-spinner');
+
+      // Clear previous errors
+      errEl.style.display = 'none';
+
+      try {
+        btn.disabled = true;
+        spinner.classList.add('active');
+        // Simulate brief auth handshake delay for UX
+        setTimeout(() => {
+          try {
+            auth.login(party, token, mode);
+          } catch (authErr) {
+            errEl.textContent = authErr.message || 'Authentication failed.';
+            errEl.style.display = 'block';
+          } finally {
+            btn.disabled = false;
+            spinner.classList.remove('active');
+          }
+        }, 600);
+      } catch (err) {
+        errEl.textContent = err.message || 'Authentication failed.';
+        errEl.style.display = 'block';
+        btn.disabled = false;
+        spinner.classList.remove('active');
+      }
+    });
+  }
+
+  // ─── Token eye toggle ────────────────────────────────────────────────────
+  const eyeBtn = document.getElementById('token-eye-btn');
+  const jwtInput = document.getElementById('login-jwt-input');
+  if (eyeBtn && jwtInput) {
+    eyeBtn.addEventListener('click', () => {
+      const isPassword = jwtInput.type === 'password';
+      jwtInput.type = isPassword ? 'text' : 'password';
+    });
+  }
+
+  // ─── Logout button ───────────────────────────────────────────────────────
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', () => auth.logout());
+  }
+
+  // ─── Party selector syncs with session ───────────────────────────────────
+  const partySelect = document.getElementById('party-select');
+  if (partySelect) {
+    partySelect.addEventListener('change', () => {
+      activeParty = partySelect.value;
+      // Update session chip
+      const info = PARTY_DISPLAY_NAMES[activeParty] || { name: activeParty, avatar: activeParty[0].toUpperCase(), role: '' };
+      const avatarEl = document.getElementById('session-avatar');
+      const nameEl   = document.getElementById('session-name');
+      if (avatarEl) avatarEl.textContent = info.avatar;
+      if (nameEl)   nameEl.textContent   = `${info.name} (${info.role})`;
+      sessionStorage.setItem('syndex_party', activeParty);
+      renderAll();
+      toast('Party Switched', `Perspective: ${info.name} (${info.role})`, 'info');
+    });
+  }
+
+  // ─── Try restore session or show login ───────────────────────────────────
+  const restored = auth.restore();
+  if (!restored) {
+    // Show login screen — it's already visible by default
+    renderAll(); // render empty state behind login
+  }
 });

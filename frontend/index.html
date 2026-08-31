@@ -196,6 +196,119 @@
     </div>
   </div>
 
+  <!-- ===== CANTON BLOCKCHAIN PROOF & VERIFICATION MODAL ===== -->
+  <div class="proof-modal-overlay" id="proof-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="proof-modal-title" style="display:none">
+    <div class="proof-modal-card">
+      <div class="proof-modal-header">
+        <div class="proof-header-left">
+          <div class="proof-shield-icon" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <polyline points="9 12 11 14 15 10"/>
+            </svg>
+          </div>
+          <div>
+            <h2 class="proof-modal-title" id="proof-modal-title">Canton On-Chain Proof</h2>
+            <p class="proof-modal-sub" id="proof-modal-sub">Cryptographic Ledger Verification</p>
+          </div>
+        </div>
+        <button class="proof-modal-close" id="proof-modal-close-btn" aria-label="Close proof dialog">&times;</button>
+      </div>
+
+      <!-- Verification Badge -->
+      <div class="proof-status-banner" id="proof-status-banner">
+        <span class="proof-status-dot"></span>
+        <span class="proof-status-text" id="proof-status-text">CRYPTOGRAPHICALLY VERIFIED ON CANTON LEDGER</span>
+        <span class="proof-consensus-tag">BFT Finalized</span>
+      </div>
+
+      <div class="proof-body">
+        <!-- Hash & ID Grid -->
+        <div class="proof-field-group">
+          <div class="proof-field">
+            <label class="proof-label">Transaction Update ID (Tx Hash)</label>
+            <div class="proof-code-wrap">
+              <code class="proof-code" id="proof-tx-hash">0x8e92f1b4a6d8c03e5b7a19f2e4c8d0a3...</code>
+              <button class="proof-copy-btn" data-copy="proof-tx-hash" title="Copy Tx Hash">Copy</button>
+            </div>
+          </div>
+          <div class="proof-field">
+            <label class="proof-label">Contract ID (Canton Multi-Hash)</label>
+            <div class="proof-code-wrap">
+              <code class="proof-code" id="proof-contract-id">#12204a9d7e31c82b9a0f...:0</code>
+              <button class="proof-copy-btn" data-copy="proof-contract-id" title="Copy Contract ID">Copy</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ledger Sequencing Info -->
+        <div class="proof-meta-grid">
+          <div class="proof-meta-item">
+            <span class="proof-meta-label">DAML Template</span>
+            <span class="proof-meta-val" id="proof-template">CantonSyndex.Core:MasterFacility</span>
+          </div>
+          <div class="proof-meta-item">
+            <span class="proof-meta-label">Ledger Offset</span>
+            <span class="proof-meta-val font-mono" id="proof-offset">0000000000000001a4</span>
+          </div>
+          <div class="proof-meta-item">
+            <span class="proof-meta-label">Sequencer Domain</span>
+            <span class="proof-meta-val font-mono" id="proof-domain">canton-sync-domain-main::1220af8...</span>
+          </div>
+          <div class="proof-meta-item">
+            <span class="proof-meta-label">Sequenced Timestamp</span>
+            <span class="proof-meta-val" id="proof-timestamp">2026-08-31T16:00:00.000Z</span>
+          </div>
+        </div>
+
+        <!-- Multi-Party Authorizing Signatures -->
+        <div class="proof-signatures-section">
+          <h4 class="proof-section-heading">Authorizing Cryptographic Signatures (Ed25519)</h4>
+          <div class="proof-signatures-list" id="proof-signatures-list">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Sub-Transaction Privacy Merkle Tree -->
+        <div class="proof-privacy-section">
+          <h4 class="proof-section-heading">Sub-Transaction Privacy &amp; Blinding Proof</h4>
+          <div class="proof-privacy-box" id="proof-privacy-box">
+            <div class="proof-privacy-row">
+              <span class="proof-privacy-tag">Merkle Root</span>
+              <code class="proof-privacy-hash" id="proof-merkle-root">sha256:7f83b1657ff1fc53b92dc18148a1d65dfc2d4b1fa3d677284addd200126d9069</code>
+            </div>
+            <div class="proof-privacy-row">
+              <span class="proof-privacy-tag">Blinding Factor</span>
+              <code class="proof-privacy-hash" id="proof-blinding-factor">0x9c4e2b... (Visible only to Stakeholders)</code>
+            </div>
+            <p class="proof-privacy-note" id="proof-privacy-note">
+              ✓ Sub-transaction view blinded for non-stakeholders. Third-party nodes verify consensus validity without disclosing contract terms.
+            </p>
+          </div>
+        </div>
+
+        <!-- Live Hash Re-Verification Simulator -->
+        <div class="proof-verify-action-box">
+          <div class="proof-verify-status-line" id="proof-live-verify-result">
+            <span class="verify-badge-pill">✓ Hash Matched</span>
+            <span class="verify-detail-text">SHA-256 integrity check verified against local Canton synchronizer root.</span>
+          </div>
+          <div class="proof-actions">
+            <button class="btn btn-primary btn-sm" id="btn-reverify-proof">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
+              Recalculate &amp; Verify Hash
+            </button>
+            <button class="btn btn-ghost btn-sm" id="btn-copy-proof-json">
+              Copy Full Proof (JSON)
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== MAIN ===== -->
   <main class="main" role="main">
 

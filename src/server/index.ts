@@ -1,8 +1,10 @@
 /**
  * CantonSyndex REST API & Static Web Server
  *
- * Exposes RESTful endpoints for enterprise core banking integration and
- * serves the CantonSyndex frontend dashboard.
+ * Exposes RESTful endpoints for enterprise core banking integration,
+ * serves the CantonSyndex frontend dashboard, and hosts a WebSocket
+ * notification hub for real-time push alerts (covenant breaches,
+ * amendment votes, interest accruals).
  *
  * Usage:
  *   npx ts-node src/server/index.ts
@@ -260,6 +262,129 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// =============================================================================
+// WEBSOCKET NOTIFICATION HUB
+// =============================================================================
+
+// Simple WebSocket server using built-in net module (no extra npm deps)
+// Implements RFC 6455 handshake + framing for text messages only.
+
+const wsClients = new Map<string, { socket: any; party: string }>();
+let wsClientId = 0;
+
+function wsHandshake(key: string): string {
+  const crypto = require('crypto');
+  const MAGIC = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+  return crypto.createHash('sha1').update(key + MAGIC).digest('base64');
+}
+
+function wsEncodeFrame(text: string): Buffer {
+  const payload = Buffer.from(text, 'utf8');
+  const len = payload.length;
+  let header: Buffer;
+  if (len < 126) {
+    header = Buffer.alloc(2);
+    header[0] = 0x81; // FIN + text opcode
+    header[1] = len;
+  } else if (len < 65536) {
+    header = Buffer.alloc(4);
+    header[0] = 0x81;
+    header[1] = 126;
+    header.writeUInt16BE(len, 2);
+  } else {
+    header = Buffer.alloc(10);
+    header[0] = 0x81;
+    header[1] = 127;
+    header.writeBigUInt64BE(BigInt(len), 2);
+  }
+  return Buffer.concat([header, payload]);
+}
+
+function wsDecodeFrame(buf: Buffer): string | null {
+  if (buf.length < 2) return null;
+  const masked = !!(buf[1] & 0x80);
+  let len = buf[1] & 0x7f;
+  let offset = 2;
+  if (len === 126) { len = buf.readUInt16BE(2); offset = 4; }
+  else if (len === 127) { len = Number(buf.readBigUInt64BE(2)); offset = 10; }
+  if (masked) {
+    const mask = buf.slice(offset, offset + 4);
+    offset += 4;
+    const data = buf.slice(offset, offset + len);
+    for (let i = 0; i < data.length; i++) data[i] ^= mask[i % 4];
+    return data.toString('utf8');
+  }
+  return buf.slice(offset, offset + len).toString('utf8');
+}
+
+function wsBroadcast(type: string, message: string, targetParty?: string): void {
+  const frame = wsEncodeFrame(JSON.stringify({ type, message, timestamp: new Date().toISOString() }));
+  for (const [, client] of wsClients) {
+    if (!targetParty || client.party === targetParty) {
+      try { client.socket.write(frame); } catch { /* client disconnected */ }
+    }
+  }
+}
+
+// Hook WebSocket upgrade on HTTP server
+server.on('upgrade', (req: http.IncomingMessage, socket: any, head: Buffer) => {
+  const key = req.headers['sec-websocket-key'] as string;
+  if (!key || req.url !== '/ws/notifications') {
+    socket.destroy();
+    return;
+  }
+
+  // Perform RFC 6455 handshake
+  socket.write([
+    'HTTP/1.1 101 Switching Protocols',
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    `Sec-WebSocket-Accept: ${wsHandshake(key)}`,
+    '', '',
+  ].join('\r\n'));
+
+  const id = String(++wsClientId);
+  wsClients.set(id, { socket, party: 'agent' });
+  console.log(`[WS] Client connected: ${id}`);
+
+  socket.on('data', (buf: Buffer) => {
+    const text = wsDecodeFrame(buf);
+    if (!text) return;
+    try {
+      const msg = JSON.parse(text);
+      if (msg.type === 'subscribe' && msg.party) {
+        const client = wsClients.get(id);
+        if (client) client.party = msg.party;
+        console.log(`[WS] ${id} subscribed as party: ${msg.party}`);
+        socket.write(wsEncodeFrame(JSON.stringify({
+          type: 'ledger_connected',
+          message: `Subscribed as ${msg.party}`,
+        })));
+      }
+    } catch { /* ignore malformed messages */ }
+  });
+
+  socket.on('close', () => {
+    wsClients.delete(id);
+    console.log(`[WS] Client disconnected: ${id}`);
+  });
+
+  socket.on('error', () => wsClients.delete(id));
+
+  // Heartbeat ping every 30 seconds
+  const ping = setInterval(() => {
+    try {
+      socket.write(wsEncodeFrame(JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() })));
+    } catch {
+      clearInterval(ping);
+      wsClients.delete(id);
+    }
+  }, 30000);
+});
+
+// Expose wsBroadcast for future server-side event injection
+export { server, bridge, wsBroadcast };
+
 if (require.main === module) {
   server.listen(PORT, () => {
     console.log(`
@@ -268,12 +393,11 @@ if (require.main === module) {
 ║      Privacy-Preserving Syndicated Loan Operations Engine      ║
 ╚════════════════════════════════════════════════════════════════╝
 
-  ► Dashboard:   http://localhost:${PORT}/
-  ► REST API:    http://localhost:${PORT}/api/health
-  ► Ledger URL:  ${AGENT_LEDGER_URL}
-  ► Party:       ${DEFAULT_AGENT_PARTY}
+  ► Dashboard:    http://localhost:${PORT}/
+  ► REST API:     http://localhost:${PORT}/api/health
+  ► WebSocket:    ws://localhost:${PORT}/ws/notifications
+  ► Ledger URL:   ${AGENT_LEDGER_URL}
+  ► Party:        ${DEFAULT_AGENT_PARTY}
 `);
   });
 }
-
-export { server, bridge };

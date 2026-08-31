@@ -17,15 +17,15 @@
     <div class="login-card">
       <div class="login-logo">
         <svg width="48" height="48" viewBox="0 0 32 32" fill="none">
-          <polygon points="16,2 30,10 30,22 16,30 2,22 2,10" fill="url(#llGrad)" stroke="rgba(139,92,246,0.4)" stroke-width="1"/>
-          <polygon points="16,8 24,13 24,19 16,24 8,19 8,13" fill="none" stroke="rgba(139,92,246,0.6)" stroke-width="1"/>
+          <polygon points="16,2 30,10 30,22 16,30 2,22 2,10" fill="url(#llGrad)" stroke="rgba(0,82,204,0.3)" stroke-width="1"/>
+          <polygon points="16,8 24,13 24,19 16,24 8,19 8,13" fill="none" stroke="rgba(0,82,204,0.5)" stroke-width="1"/>
           <circle cx="16" cy="16" r="3" fill="url(#llGrad2)"/>
           <defs>
             <linearGradient id="llGrad" x1="0" y1="0" x2="32" y2="32">
-              <stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/>
+              <stop offset="0%" stop-color="#003d99"/><stop offset="100%" stop-color="#0ea5e9"/>
             </linearGradient>
             <linearGradient id="llGrad2" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="#c4b5fd"/><stop offset="100%" stop-color="#67e8f9"/>
+              <stop offset="0%" stop-color="#0052cc"/><stop offset="100%" stop-color="#38bdf8"/>
             </linearGradient>
           </defs>
         </svg>
@@ -41,11 +41,11 @@
           <label for="login-party-select">Institution / Party</label>
           <select id="login-party-select" class="login-input" required aria-required="true">
             <option value="">— Select your institution —</option>
-            <option value="agent">🏦 GlobalLeadBank (Agent / Arranger)</option>
-            <option value="borrower">🏢 BorrowerCorp (Obligor)</option>
-            <option value="bankA">🏛️ AlphaBank (Senior Lender A)</option>
-            <option value="bankB">🏛️ BetaBank (Senior Lender B)</option>
-            <option value="regulator">🔍 CentralBank (Regulator / Observer)</option>
+            <option value="agent" selected>🏦 Goldman Sachs (Lead Arranger / Agent)</option>
+            <option value="borrower">🏢 Amazon Capital (Obligor / Borrower)</option>
+            <option value="bankA">🏛️ JPMorgan Chase (Senior Lender US)</option>
+            <option value="bankB">🏛️ Deutsche Bank (Senior Lender EU)</option>
+            <option value="regulator">🔍 Federal Reserve (Observer / Regulator)</option>
           </select>
         </div>
 
@@ -56,6 +56,7 @@
               type="password"
               id="login-jwt-input"
               class="login-input"
+              value="local-dev-jwt"
               placeholder="eyJhbGciOiJSUzI1NiIsInR5cCI6..."
               autocomplete="off"
               spellcheck="false"
@@ -75,7 +76,7 @@
         <div class="login-field">
           <label for="login-mode-select">Network Mode</label>
           <select id="login-mode-select" class="login-input" aria-label="Select network mode">
-            <option value="simulated">⚡ Interactive Sandbox (Demo)</option>
+            <option value="simulated" selected>⚡ Interactive Sandbox (Demo)</option>
             <option value="live-local">🔗 Canton LocalNet (Live JSON API)</option>
           </select>
         </div>
@@ -87,7 +88,7 @@
       </form>
 
       <div class="login-demo-hint">
-        <span>Demo? Use party <strong>GlobalLeadBank</strong> · token <code>local-dev-jwt</code></span>
+        <span>Demo? Use party <strong>Goldman Sachs</strong> · token <code>local-dev-jwt</code></span>
       </div>
     </div>
   </div>
@@ -98,17 +99,17 @@
       <div class="logo-group">
         <div class="logo-icon" aria-hidden="true">
           <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-            <polygon points="16,2 30,10 30,22 16,30 2,22 2,10" fill="url(#logoGrad)" stroke="rgba(139,92,246,0.4)" stroke-width="1"/>
-            <polygon points="16,8 24,13 24,19 16,24 8,19 8,13" fill="none" stroke="rgba(139,92,246,0.6)" stroke-width="1"/>
+            <polygon points="16,2 30,10 30,22 16,30 2,22 2,10" fill="url(#logoGrad)" stroke="rgba(0,82,204,0.3)" stroke-width="1"/>
+            <polygon points="16,8 24,13 24,19 16,24 8,19 8,13" fill="none" stroke="rgba(0,82,204,0.5)" stroke-width="1"/>
             <circle cx="16" cy="16" r="3" fill="url(#logoGrad2)"/>
             <defs>
               <linearGradient id="logoGrad" x1="0" y1="0" x2="32" y2="32">
-                <stop offset="0%" stop-color="#8b5cf6"/>
-                <stop offset="100%" stop-color="#06b6d4"/>
+                <stop offset="0%" stop-color="#003d99"/>
+                <stop offset="100%" stop-color="#0ea5e9"/>
               </linearGradient>
               <linearGradient id="logoGrad2" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stop-color="#c4b5fd"/>
-                <stop offset="100%" stop-color="#67e8f9"/>
+                <stop offset="0%" stop-color="#0052cc"/>
+                <stop offset="100%" stop-color="#38bdf8"/>
               </linearGradient>
             </defs>
           </svg>
@@ -143,11 +144,11 @@
         <div class="party-selector" id="party-selector-wrap">
           <label class="party-label" for="party-select">Active Party</label>
           <select id="party-select" class="party-select" aria-label="Select active party">
-            <option value="agent">GlobalLeadBank (Agent)</option>
-            <option value="borrower">BorrowerCorp</option>
-            <option value="bankA">AlphaBank (Bank A)</option>
-            <option value="bankB">BetaBank (Bank B)</option>
-            <option value="regulator">CentralBank (Regulator)</option>
+            <option value="agent">Goldman Sachs (Agent)</option>
+            <option value="borrower">Amazon Capital (Borrower)</option>
+            <option value="bankA">JPMorgan Chase (Lender A)</option>
+            <option value="bankB">Deutsche Bank (Lender B)</option>
+            <option value="regulator">Federal Reserve (Regulator)</option>
           </select>
         </div>
         <div class="status-pill" id="ledger-status" role="status">
@@ -155,8 +156,8 @@
           <span id="ledger-status-text">Canton Ledger</span>
         </div>
         <div class="session-chip" id="session-chip" aria-label="Active session">
-          <span class="session-avatar" id="session-avatar">G</span>
-          <span class="session-name" id="session-name">GlobalLeadBank</span>
+          <span class="session-avatar" id="session-avatar">GS</span>
+          <span class="session-name" id="session-name">Goldman Sachs</span>
         </div>
         <button class="logout-btn" id="logout-btn" aria-label="Sign out of session" title="Sign out">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -170,7 +171,7 @@
     </div>
   </header>
 
-  <!-- ===== TOAST NOTIFICATION CONTAINER (WebSocket push alerts) ===== -->
+  <!-- ===== TOAST NOTIFICATION CONTAINER ===== -->
   <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="false" role="region" aria-label="Real-time alerts"></div>
 
   <!-- ===== ERROR MODAL (DAML assertion errors → user readable messages) ===== -->
@@ -208,7 +209,7 @@
         <div class="facility-hero-left">
           <p class="facility-tag">Master Facility · FAC-2026-USD-100M</p>
           <h2 class="facility-amount">$100,000,000</h2>
-          <p class="facility-currency">USD · GlobalLeadBank (Lead Arranger)</p>
+          <p class="facility-currency">USD · Goldman Sachs (Lead Arranger)</p>
           <div class="facility-badges">
             <span class="badge badge-active">Active</span>
             <span class="badge badge-canton">Canton Network</span>
@@ -219,13 +220,13 @@
           <div class="headroom-gauge-wrap">
             <svg class="headroom-gauge" viewBox="0 0 200 120" aria-label="Facility utilization gauge">
               <!-- Arc background -->
-              <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="rgba(139,92,246,0.15)" stroke-width="16" stroke-linecap="round"/>
+              <path d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="rgba(0,82,204,0.12)" stroke-width="16" stroke-linecap="round"/>
               <!-- Arc fill -->
               <path id="gauge-arc" d="M 20 100 A 80 80 0 0 1 180 100" fill="none" stroke="url(#gaugeGrad)" stroke-width="16" stroke-linecap="round" stroke-dasharray="251" stroke-dashoffset="188"/>
               <defs>
                 <linearGradient id="gaugeGrad" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0%" stop-color="#8b5cf6"/>
-                  <stop offset="100%" stop-color="#06b6d4"/>
+                  <stop offset="0%" stop-color="#003d99"/>
+                  <stop offset="100%" stop-color="#0ea5e9"/>
                 </linearGradient>
               </defs>
               <text x="100" y="95" text-anchor="middle" class="gauge-pct" id="gauge-pct-text">25%</text>
@@ -255,7 +256,7 @@
         <div class="kpi-card" id="kpi-tranches">
           <p class="kpi-label">Active Tranches</p>
           <p class="kpi-value" id="kpi-tranches-val">2</p>
-          <p class="kpi-sub">AlphaBank · BetaBank</p>
+          <p class="kpi-sub">JPMorgan Chase · Deutsche Bank</p>
         </div>
         <div class="kpi-card" id="kpi-drawdowns">
           <p class="kpi-label">Total Drawdowns</p>
@@ -276,8 +277,8 @@
         <div class="topology-grid">
           <div class="topo-node topo-node--borrower">
             <div class="topo-icon">🏢</div>
-            <div class="topo-name">BorrowerCorp</div>
-            <div class="topo-role">Borrower</div>
+            <div class="topo-name">Amazon Capital</div>
+            <div class="topo-role">Borrower (Obligor)</div>
             <div class="topo-sees">
               <span class="topo-contract">MasterFacility ✓</span>
               <span class="topo-contract">DrawdownExecution ✓</span>
@@ -285,8 +286,8 @@
           </div>
           <div class="topo-node topo-node--agent">
             <div class="topo-icon">🏛️</div>
-            <div class="topo-name">GlobalLeadBank</div>
-            <div class="topo-role">Lead Agent</div>
+            <div class="topo-name">Goldman Sachs</div>
+            <div class="topo-role">Lead Arranger / Agent</div>
             <div class="topo-sees">
               <span class="topo-contract">MasterFacility ✓</span>
               <span class="topo-contract">TrancheParticipation (all) ✓</span>
@@ -296,27 +297,27 @@
           </div>
           <div class="topo-node topo-node--bankA">
             <div class="topo-icon">🏦</div>
-            <div class="topo-name">AlphaBank</div>
-            <div class="topo-role">Participant · Bank A</div>
+            <div class="topo-name">JPMorgan Chase</div>
+            <div class="topo-role">Senior Lender (US)</div>
             <div class="topo-sees">
               <span class="topo-contract">TrancheParticipation (own) ✓</span>
-              <span class="topo-contract topo-contract--blocked">Bank B Tranche ✗</span>
+              <span class="topo-contract topo-contract--blocked">Deutsche Bank Tranche ✗</span>
               <span class="topo-contract">RepaymentReceipt (own) ✓</span>
             </div>
           </div>
           <div class="topo-node topo-node--bankB">
             <div class="topo-icon">🏦</div>
-            <div class="topo-name">BetaBank</div>
-            <div class="topo-role">Participant · Bank B</div>
+            <div class="topo-name">Deutsche Bank</div>
+            <div class="topo-role">Senior Lender (EU)</div>
             <div class="topo-sees">
               <span class="topo-contract">TrancheParticipation (own) ✓</span>
-              <span class="topo-contract topo-contract--blocked">Bank A Tranche ✗</span>
+              <span class="topo-contract topo-contract--blocked">JPMorgan Tranche ✗</span>
               <span class="topo-contract">RepaymentReceipt (own) ✓</span>
             </div>
           </div>
           <div class="topo-node topo-node--regulator">
             <div class="topo-icon">⚖️</div>
-            <div class="topo-name">CentralBank</div>
+            <div class="topo-name">Federal Reserve</div>
             <div class="topo-role">Regulator (Observer)</div>
             <div class="topo-sees">
               <span class="topo-contract">MasterFacility (read-only) ✓</span>
@@ -360,15 +361,15 @@
       <!-- New Tranche Form -->
       <div class="section-card" id="new-tranche-form" style="display:none;">
         <h2 class="section-title">Syndicate New Tranche</h2>
-        <p class="section-desc">Controller: Agent (GlobalLeadBank). Creates a bilateral TrancheParticipation contract.</p>
+        <p class="section-desc">Controller: Agent (Goldman Sachs). Creates a bilateral TrancheParticipation contract.</p>
         <form id="tranche-form" class="form-grid" novalidate>
           <div class="form-group">
             <label class="form-label" for="t-lender">Participant Lender</label>
             <select id="t-lender" class="form-input" required>
               <option value="">Select lender...</option>
-              <option value="bankA">AlphaBank</option>
-              <option value="bankB">BetaBank</option>
-              <option value="bankC">GammaBank</option>
+              <option value="bankA">JPMorgan Chase</option>
+              <option value="bankB">Deutsche Bank</option>
+              <option value="bankC">BNP Paribas</option>
             </select>
           </div>
           <div class="form-group">
@@ -393,7 +394,7 @@
     <section class="tab-panel" id="panel-drawdown" aria-labelledby="tab-drawdown">
       <div class="section-card">
         <h2 class="section-title">Drawdown Operations</h2>
-        <p class="section-desc">Controller: Borrower (BorrowerCorp). Triggers atomic drawdown against facility headroom.</p>
+        <p class="section-desc">Controller: Borrower (Amazon Capital). Triggers atomic drawdown against facility headroom.</p>
 
         <div class="drawdown-info-grid">
           <div class="info-block">
@@ -420,7 +421,7 @@
             <input id="d-amount" class="form-input" type="number" min="1" step="1000000" placeholder="e.g. 15000000" required />
           </div>
           <div class="form-group form-group--full">
-            <p class="form-hint">Pro-rata distribution: AlphaBank will receive 60% · BetaBank will receive 40%</p>
+            <p class="form-hint">Pro-rata distribution: JPMorgan Chase will receive 60% · Deutsche Bank will receive 40%</p>
           </div>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary" id="btn-submit-draw">Submit RequestDrawdown</button>
@@ -472,8 +473,8 @@
           <div class="form-group">
             <label class="form-label" for="int-tranche">Select Tranche Accrual</label>
             <select id="int-tranche" class="form-input" required>
-              <option value="bankA">AlphaBank — $12M drawn @ 6.80% (Actual/365)</option>
-              <option value="bankB">BetaBank — $8M drawn @ 7.05% (Actual/365)</option>
+              <option value="bankA">JPMorgan Chase — $12M drawn @ 6.80% (Actual/365)</option>
+              <option value="bankB">Deutsche Bank — $8M drawn @ 7.05% (Actual/365)</option>
             </select>
           </div>
           <div class="form-group">
@@ -540,15 +541,15 @@
         </div>
 
         <div class="tranches-grid" id="fee-cards-grid" style="margin-top: 1.5rem;">
-          <!-- Dynamic Fee Cards for AlphaBank and BetaBank -->
+          <!-- Dynamic Fee Cards for JPMorgan Chase and Deutsche Bank -->
         </div>
 
         <form id="fee-action-form" class="form-grid" style="margin-top: 2rem;" novalidate>
           <div class="form-group">
             <label class="form-label" for="fee-lender">Lender Tranche</label>
             <select id="fee-lender" class="form-input" required>
-              <option value="bankA">AlphaBank — $48M Undrawn ($60M total)</option>
-              <option value="bankB">BetaBank — $32M Undrawn ($40M total)</option>
+              <option value="bankA">JPMorgan Chase — $48M Undrawn ($60M total)</option>
+              <option value="bankB">Deutsche Bank — $32M Undrawn ($40M total)</option>
             </select>
           </div>
           <div class="form-group">
@@ -591,9 +592,9 @@
         </div>
 
         <!-- Test Covenant Form -->
-        <div class="covenant-test-box" style="margin-top: 2rem; padding: 1.5rem; background: rgba(139,92,246,0.05); border: 1px solid rgba(139,92,246,0.2); border-radius: 12px;">
-          <h3 style="margin-bottom: 0.5rem; font-size: 1.1rem; color: #f8fafc;">Execute Quarterly Covenant Test (Agent Controller)</h3>
-          <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 1.25rem;">Submit actual financial metrics from the borrower's certified quarterly compliance certificate.</p>
+        <div class="covenant-test-box" style="margin-top: 2rem; padding: 1.5rem; background: rgba(0,82,204,0.04); border: 1px solid rgba(0,82,204,0.18); border-radius: 12px;">
+          <h3 style="margin-bottom: 0.5rem; font-size: 1.1rem; color: #0f172a;">Execute Quarterly Covenant Test (Agent Controller)</h3>
+          <p style="font-size: 0.85rem; color: #475569; margin-bottom: 1.25rem;">Submit actual financial metrics from the borrower's certified quarterly compliance certificate.</p>
           
           <form id="covenant-test-form" class="form-grid" novalidate>
             <div class="form-group">
@@ -649,9 +650,9 @@
         </div>
 
         <!-- Propose Amendment Form -->
-        <div class="amendment-form-box" style="margin-top: 2rem; padding: 1.5rem; background: rgba(6,182,212,0.05); border: 1px solid rgba(6,182,212,0.2); border-radius: 12px;">
-          <h3 style="margin-bottom: 0.5rem; font-size: 1.1rem; color: #f8fafc;">Propose New Facility Amendment (Borrower & Agent)</h3>
-          <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 1.25rem;">Requires unanimous consent for limit expansion/currency change, or simple majority for maturity and participant adjustments.</p>
+        <div class="amendment-form-box" style="margin-top: 2rem; padding: 1.5rem; background: rgba(0,82,204,0.04); border: 1px solid rgba(0,82,204,0.18); border-radius: 12px;">
+          <h3 style="margin-bottom: 0.5rem; font-size: 1.1rem; color: #0f172a;">Propose New Facility Amendment (Borrower & Agent)</h3>
+          <p style="font-size: 0.85rem; color: #475569; margin-bottom: 1.25rem;">Requires unanimous consent for limit expansion/currency change, or simple majority for maturity and participant adjustments.</p>
 
           <form id="amendment-proposal-form" class="form-grid" novalidate>
             <div class="form-group">
@@ -707,8 +708,8 @@
             <label class="form-label" for="s-lender">Lender Tranche</label>
             <select id="s-lender" class="form-input" required>
               <option value="">Select tranche...</option>
-              <option value="bankA">AlphaBank — $12M drawn @ 150bps</option>
-              <option value="bankB">BetaBank — $8M drawn @ 175bps</option>
+              <option value="bankA">JPMorgan Chase — $12M drawn @ 150bps</option>
+              <option value="bankB">Deutsche Bank — $8M drawn @ 175bps</option>
             </select>
           </div>
           <div class="form-group">
@@ -751,9 +752,6 @@
     </section>
 
   </main>
-
-  <!-- ===== TOAST NOTIFICATIONS ===== -->
-  <div class="toast-container" id="toast-container" role="alert" aria-live="assertive" aria-atomic="true"></div>
 
   <script src="main.js"></script>
 </body>

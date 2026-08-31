@@ -42,14 +42,14 @@ const state = {
     totalLimit:  100_000_000,
     drawnAmount:  20_000_000,
     isActive:    true,
-    borrower:    'BorrowerCorp',
-    agent:       'GlobalLeadBank',
-    regulator:   'CentralBank',
+    borrower:    'Amazon Capital',
+    agent:       'Goldman Sachs',
+    regulator:   'Federal Reserve',
   },
   tranches: [
     {
-      id:               'TRANCHE-ALPHA-001',
-      lender:           'AlphaBank',
+      id:               'TRANCHE-JPMC-001',
+      lender:           'JPMorgan Chase',
       lenderKey:        'bankA',
       commitmentAmount: 60_000_000,
       drawnAmount:      12_000_000,
@@ -57,8 +57,8 @@ const state = {
       isActive:         true,
     },
     {
-      id:               'TRANCHE-BETA-001',
-      lender:           'BetaBank',
+      id:               'TRANCHE-DB-001',
+      lender:           'Deutsche Bank',
       lenderKey:        'bankB',
       commitmentAmount: 40_000_000,
       drawnAmount:       8_000_000,
@@ -68,9 +68,9 @@ const state = {
   ],
   interestContracts: [
     {
-      trancheId:          'INT-ALPHA-Q3-2026',
+      trancheId:          'INT-JPMC-Q3-2026',
       lenderKey:          'bankA',
-      lender:             'AlphaBank',
+      lender:             'JPMorgan Chase',
       principalBalance:   12_000_000,
       baseRateBps:        530.0, // SOFR
       marginSpreadBps:    150.0,
@@ -82,9 +82,9 @@ const state = {
       isSettled:          false,
     },
     {
-      trancheId:          'INT-BETA-Q3-2026',
+      trancheId:          'INT-DB-Q3-2026',
       lenderKey:          'bankB',
-      lender:             'BetaBank',
+      lender:             'Deutsche Bank',
       principalBalance:    8_000_000,
       baseRateBps:        530.0,
       marginSpreadBps:    175.0,
@@ -99,9 +99,9 @@ const state = {
   interestReceipts: [],
   feeContracts: [
     {
-      trancheId:        'FEE-ALPHA-Q3-2026',
+      trancheId:        'FEE-JPMC-Q3-2026',
       lenderKey:        'bankA',
-      lender:           'AlphaBank',
+      lender:           'JPMorgan Chase',
       commitmentAmount: 60_000_000,
       drawnAmount:      12_000_000,
       undrawnAmount:    48_000_000,
@@ -112,9 +112,9 @@ const state = {
       isSettled:        false,
     },
     {
-      trancheId:        'FEE-BETA-Q3-2026',
+      trancheId:        'FEE-DB-Q3-2026',
       lenderKey:        'bankB',
-      lender:           'BetaBank',
+      lender:           'Deutsche Bank',
       commitmentAmount: 40_000_000,
       drawnAmount:       8_000_000,
       undrawnAmount:    32_000_000,
@@ -152,8 +152,8 @@ const state = {
       rationale:           'Borrower requests $50M credit expansion for European renewable infrastructure project.',
       proposalDate:        '2026-08-25',
       expiryDate:          '2026-09-30',
-      lenders:             ['AlphaBank', 'BetaBank'],
-      acceptedBy:          ['AlphaBank'],
+      lenders:             ['JPMorgan Chase', 'Deutsche Bank'],
+      acceptedBy:          ['JPMorgan Chase'],
       rejectedBy:          [],
       isExecuted:          false,
       requiresUnanimous:   true,
@@ -166,37 +166,37 @@ const state = {
       amount:      20_000_000,
       executed:    true,
       timestamp:  '2026-08-28T09:15:00Z',
-      controller:  'BorrowerCorp',
+      controller:  'Amazon Capital',
     },
   ],
   receipts: [],
   auditLog: [
     {
       type:      'FacilityCreated',
-      color:     '#8b5cf6',
+      color:     '#0052cc',
       title:     'MasterFacility Created',
-      detail:    'FAC-2026-USD-100M · $100M USD · BorrowerCorp + GlobalLeadBank',
+      detail:    'FAC-2026-USD-100M · $100M USD · Amazon Capital + Goldman Sachs',
       timestamp: '2026-08-28T08:00:00Z',
     },
     {
       type:      'TrancheSyndicated',
       color:     '#f59e0b',
-      title:     'Tranche Syndicated → AlphaBank',
-      detail:    '$60,000,000 @ 150 bps · TRANCHE-ALPHA-001',
+      title:     'Tranche Syndicated → JPMorgan Chase',
+      detail:    '$60,000,000 @ 150 bps · TRANCHE-JPMC-001',
       timestamp: '2026-08-28T08:30:00Z',
     },
     {
       type:      'TrancheSyndicated',
       color:     '#ec4899',
-      title:     'Tranche Syndicated → BetaBank',
-      detail:    '$40,000,000 @ 175 bps · TRANCHE-BETA-001',
+      title:     'Tranche Syndicated → Deutsche Bank',
+      detail:    '$40,000,000 @ 175 bps · TRANCHE-DB-001',
       timestamp: '2026-08-28T08:35:00Z',
     },
     {
       type:      'InterestAccrualInitiated',
       color:     '#06b6d4',
       title:     'Bilateral Interest Accrual Initialized',
-      detail:    'AlphaBank ($12M @ 6.80%) & BetaBank ($8M @ 7.05%)',
+      detail:    'JPMorgan Chase ($12M @ 6.80%) & Deutsche Bank ($8M @ 7.05%)',
       timestamp: '2026-08-28T08:40:00Z',
     },
     {
@@ -210,7 +210,7 @@ const state = {
       type:      'DrawdownExecuted',
       color:     '#10b981',
       title:     'Drawdown Distributed Pro-Rata',
-      detail:    'AlphaBank: $12M (60%) · BetaBank: $8M (40%)',
+      detail:    'JPMorgan Chase: $12M (60%) · Deutsche Bank: $8M (40%)',
       timestamp: '2026-08-28T09:15:00Z',
     },
   ],
@@ -239,13 +239,34 @@ const TOAST_ICONS = {
   error:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
 };
 
-const toast = (title, message = '', type = 'info', duration = 5000) => {
+const toast = (arg1, arg2 = '', arg3 = 'info', duration = 4500) => {
   const container = document.getElementById('toast-container');
   if (!container) return;
-  // Support legacy single-string call
-  if (!message && typeof title === 'string' && !['info','success','warning','error'].includes(message)) {
-    message = title; title = type === 'error' ? 'Error' : type === 'success' ? 'Success' : type === 'warning' ? 'Warning' : 'Notice';
+
+  let title = 'Notice';
+  let message = '';
+  let type = 'info';
+
+  const VALID_TYPES = ['info', 'success', 'warning', 'error'];
+
+  if (VALID_TYPES.includes(arg2)) {
+    // Called as toast('My message', 'success')
+    message = arg1;
+    type = arg2;
+    title = type === 'error' ? 'Error' : type === 'success' ? 'Success' : type === 'warning' ? 'Warning' : 'System Notice';
+    if (typeof arg3 === 'number') duration = arg3;
+  } else if (arg2 && typeof arg2 === 'string') {
+    // Called as toast('Title', 'Message', 'type')
+    title = arg1;
+    message = arg2;
+    type = VALID_TYPES.includes(arg3) ? arg3 : 'info';
+  } else {
+    // Called as toast('My message')
+    message = arg1;
+    title = 'Notice';
+    type = 'info';
   }
+
   const el = document.createElement('div');
   el.className = `toast toast-${type}`;
   el.innerHTML = `
@@ -266,7 +287,7 @@ const toast = (title, message = '', type = 'info', duration = 5000) => {
   setTimeout(dismiss, duration);
 };
 
-const logAudit = (type, title, detail, color = '#8b5cf6') => {
+const logAudit = (type, title, detail, color = '#0052cc') => {
   state.auditLog.unshift({
     type,
     title,
@@ -412,11 +433,11 @@ const cantonApi = {
 // =============================================================================
 
 const PARTY_DISPLAY_NAMES = {
-  agent:     { name: 'GlobalLeadBank', role: 'Agent', avatar: 'G' },
-  borrower:  { name: 'BorrowerCorp',  role: 'Borrower', avatar: 'B' },
-  bankA:     { name: 'AlphaBank',     role: 'Lender A', avatar: 'A' },
-  bankB:     { name: 'BetaBank',      role: 'Lender B', avatar: 'β' },
-  regulator: { name: 'CentralBank',   role: 'Regulator', avatar: 'R' },
+  agent:     { name: 'Goldman Sachs',  role: 'Lead Arranger', avatar: 'GS' },
+  borrower:  { name: 'Amazon Capital', role: 'Borrower',      avatar: 'AC' },
+  bankA:     { name: 'JPMorgan Chase', role: 'Senior Lender', avatar: 'JPM' },
+  bankB:     { name: 'Deutsche Bank',  role: 'Senior Lender', avatar: 'DB' },
+  regulator: { name: 'Federal Reserve',role: 'Regulator',     avatar: 'FED' },
 };
 
 const auth = {
@@ -465,7 +486,7 @@ const auth = {
     if (overlay) overlay.classList.remove('hidden');
     const errEl = document.getElementById('login-error');
     if (errEl) errEl.style.display = 'none';
-    toast('Session', 'You have been signed out successfully.', 'info');
+    toast('You have been signed out successfully.', 'info');
   },
 
   _applySession() {
@@ -482,11 +503,11 @@ const auth = {
     if (modeSelect) modeSelect.value = networkMode;
 
     // Update session chip
-    const info = PARTY_DISPLAY_NAMES[activeParty] || { name: activeParty, avatar: activeParty[0].toUpperCase() };
+    const info = PARTY_DISPLAY_NAMES[activeParty] || { name: activeParty, avatar: activeParty[0].toUpperCase(), role: '' };
     const avatarEl = document.getElementById('session-avatar');
     const nameEl   = document.getElementById('session-name');
     if (avatarEl) avatarEl.textContent = info.avatar;
-    if (nameEl)   nameEl.textContent   = `${info.name} (${info.role})`;
+    if (nameEl)   nameEl.textContent   = `${info.name}`;
 
     // Update ledger status
     const statusText = document.getElementById('ledger-status-text');
@@ -494,11 +515,17 @@ const auth = {
       statusText.textContent = networkMode === 'live-local' ? 'Canton LocalNet (Live)' : 'Interactive Sandbox';
     }
 
+    // Default to Overview tab if none active
+    const activeTab = document.querySelector('.tab-btn.active');
+    if (!activeTab) {
+      document.getElementById('tab-overview')?.click();
+    }
+
     // Boot streaming and dashboard
     renderAll();
     startAcsStreaming();
     startWebSocket();
-    toast('Welcome', `Session active — ${info.name} (${info.role})`, 'success');
+    toast(`Welcome, ${info.name}`, `Active as ${info.role}`, 'success');
   },
 };
 
@@ -1111,7 +1138,7 @@ const renderAll = () => {
 
 // Cast amendment vote (global for onclick)
 window.castVote = (proposalId, accept) => {
-  const partyName = activeParty === 'bankA' ? 'AlphaBank' : activeParty === 'bankB' ? 'BetaBank' : null;
+  const partyName = activeParty === 'bankA' ? 'JPMorgan Chase' : activeParty === 'bankB' ? 'Deutsche Bank' : null;
   if (!partyName) {
     toast('Only participating syndicate lenders can cast votes.', 'error');
     return;
@@ -1197,7 +1224,7 @@ const setupForms = () => {
       }
 
       state.facility.drawnAmount += amount;
-      // Pro-rata distribution: AlphaBank 60%, BetaBank 40%
+      // Pro-rata distribution: JPMorgan Chase 60%, Deutsche Bank 40%
       const alphaDraw = amount * 0.6;
       const betaDraw  = amount * 0.4;
       state.tranches[0].drawnAmount += alphaDraw;
@@ -1217,14 +1244,14 @@ const setupForms = () => {
         amount,
         executed: true,
         timestamp: new Date().toISOString(),
-        controller: 'BorrowerCorp',
+        controller: 'Amazon Capital',
       });
 
       toast(`Drawdown ${drawId} for ${usd(amount)} executed!`, 'success');
       logAudit(
         'DrawdownExecuted',
         `Drawdown ${drawId} Distributed`,
-        `AlphaBank: +${usd(alphaDraw)} (60%) · BetaBank: +${usd(betaDraw)} (40%)`,
+        `JPMorgan Chase: +${usd(alphaDraw)} (60%) · Deutsche Bank: +${usd(betaDraw)} (40%)`,
         '#10b981'
       );
       renderAll();
@@ -1461,7 +1488,7 @@ const setupForms = () => {
         rationale,
         proposalDate: new Date().toISOString().split('T')[0],
         expiryDate: expiry,
-        lenders: ['AlphaBank', 'BetaBank'],
+        lenders: ['JPMorgan Chase', 'Deutsche Bank'],
         acceptedBy: [],
         rejectedBy: [],
         isExecuted: false,

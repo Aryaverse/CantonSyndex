@@ -8,6 +8,7 @@
     "build": "tsc",
     "build:watch": "tsc --watch",
     "start": "node dist/bridge/index.js",
+    "server": "node dist/server/index.js",
     "lint": "eslint src --ext .ts",
     "test": "jest"
   },

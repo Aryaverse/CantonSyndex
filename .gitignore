@@ -29,3 +29,6 @@ coverage/
 # Env
 .env
 .env.local
+
+# Documents
+*.pdf

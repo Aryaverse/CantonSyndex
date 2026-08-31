@@ -43,11 +43,23 @@
         <button class="tab-btn active" id="tab-overview"   data-tab="overview"   aria-selected="true">Overview</button>
         <button class="tab-btn"        id="tab-tranches"   data-tab="tranches"   aria-selected="false">Tranches</button>
         <button class="tab-btn"        id="tab-drawdown"   data-tab="drawdown"   aria-selected="false">Drawdown</button>
+        <button class="tab-btn"        id="tab-interest"   data-tab="interest"   aria-selected="false">Interest</button>
+        <button class="tab-btn"        id="tab-fees"       data-tab="fees"       aria-selected="false">Commitment Fees</button>
+        <button class="tab-btn"        id="tab-covenants"  data-tab="covenants"  aria-selected="false">Covenants</button>
+        <button class="tab-btn"        id="tab-amendments" data-tab="amendments" aria-selected="false">Amendments</button>
         <button class="tab-btn"        id="tab-settlement" data-tab="settlement" aria-selected="false">Settlement</button>
         <button class="tab-btn"        id="tab-audit"      data-tab="audit"      aria-selected="false">Audit Log</button>
       </nav>
 
       <div class="header-right">
+        <div class="connection-mode-selector" id="mode-selector-wrap">
+          <label class="party-label" for="network-mode-select">Network Mode</label>
+          <select id="network-mode-select" class="party-select mode-select" aria-label="Select network mode">
+            <option value="simulated">⚡ Interactive Sandbox</option>
+            <option value="live-local">🔗 Canton LocalNet (Live JSON API)</option>
+          </select>
+        </div>
+
         <div class="party-selector" id="party-selector-wrap">
           <label class="party-label" for="party-select">Active Party</label>
           <select id="party-select" class="party-select" aria-label="Select active party">
@@ -60,7 +72,7 @@
         </div>
         <div class="status-pill" id="ledger-status" role="status">
           <span class="status-dot" aria-hidden="true"></span>
-          <span>Canton Ledger</span>
+          <span id="ledger-status-text">Canton Ledger</span>
         </div>
       </div>
     </div>
@@ -301,6 +313,264 @@
         <div class="events-feed" id="drawdown-events">
           <h3 class="events-title">Recent Drawdown Events</h3>
           <div id="draw-event-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         TAB: INTEREST ACCRUAL ENGINE
+         ============================================================ -->
+    <section class="tab-panel" id="panel-interest" aria-labelledby="tab-interest">
+      <div class="section-card">
+        <div class="section-header-flex">
+          <div>
+            <h2 class="section-title">Interest Accrual & Rate Engine</h2>
+            <p class="section-desc">Bilateral interest accrual contracts between Agent and each Lender. Supports Actual/365, Actual/360, and 30/360 conventions.</p>
+          </div>
+          <span class="badge badge-canton">Bilateral Sub-Tx Privacy</span>
+        </div>
+
+        <div class="stats-row" id="interest-stats-row">
+          <div class="stat-card">
+            <span class="stat-label">Total Accrued Interest</span>
+            <span class="stat-value text-accent" id="stat-total-interest">$103,956</span>
+            <span class="stat-meta">Active Period: Q3 2026</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Reference Base Rate</span>
+            <span class="stat-value" id="stat-sofr-rate">5.30%</span>
+            <span class="stat-meta">SOFR (530 bps)</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Weighted All-In Rate</span>
+            <span class="stat-value text-cyan" id="stat-allin-rate">6.90%</span>
+            <span class="stat-meta">Base + Tranche Margin</span>
+          </div>
+        </div>
+
+        <!-- Interest Accrual Actions Form -->
+        <form id="interest-accrue-form" class="form-grid" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="int-tranche">Select Tranche Accrual</label>
+            <select id="int-tranche" class="form-input" required>
+              <option value="bankA">AlphaBank — $12M drawn @ 6.80% (Actual/365)</option>
+              <option value="bankB">BetaBank — $8M drawn @ 7.05% (Actual/365)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="int-accrual-date">Accrual Date</label>
+            <input id="int-accrual-date" class="form-input" type="date" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="int-convention">Day-Count Convention</label>
+            <select id="int-convention" class="form-input">
+              <option value="Actual365Fixed">Actual/365 Fixed (Standard)</option>
+              <option value="Actual360">Actual/360 (Money Market)</option>
+              <option value="Thirty360">30/360 (Bond Basis)</option>
+            </select>
+          </div>
+          <div class="form-actions form-actions--inline">
+            <button type="button" class="btn btn-secondary" id="btn-calc-accrual">Calculate Accrual</button>
+            <button type="submit" class="btn btn-primary" id="btn-submit-accrue">Execute AccrueInterest</button>
+            <button type="button" class="btn btn-warning" id="btn-collect-interest">Collect & Settle Interest</button>
+          </div>
+        </form>
+
+        <div class="tranches-grid" id="interest-contracts-grid" style="margin-top: 2rem;">
+          <!-- Dynamically populated -->
+        </div>
+
+        <div class="receipts-list" style="margin-top: 2rem;">
+          <h3 class="events-title">Interest Payment Receipts (Audit Trail)</h3>
+          <div id="interest-receipts-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         TAB: COMMITMENT FEE ENGINE
+         ============================================================ -->
+    <section class="tab-panel" id="panel-fees" aria-labelledby="tab-fees">
+      <div class="section-card">
+        <div class="section-header-flex">
+          <div>
+            <h2 class="section-title">Undrawn Commitment Fee Engine</h2>
+            <p class="section-desc">Compensates syndicate lenders for allocated liquidity reserves on undrawn commitment portions (Actual/365 basis).</p>
+          </div>
+          <span class="badge badge-privacy">Bilateral Privacy Guaranteed</span>
+        </div>
+
+        <div class="stats-row">
+          <div class="stat-card">
+            <span class="stat-label">Total Undrawn Capacity</span>
+            <span class="stat-value text-cyan" id="stat-total-undrawn">$80,000,000</span>
+            <span class="stat-meta">80.0% of $100M Limit</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Standard Commitment Fee</span>
+            <span class="stat-value">50 bps</span>
+            <span class="stat-meta">0.50% per annum</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Total Accrued Fees</span>
+            <span class="stat-value text-accent" id="stat-total-accrued-fees">$100,821</span>
+            <span class="stat-meta">Current Quarter Accrual</span>
+          </div>
+        </div>
+
+        <div class="tranches-grid" id="fee-cards-grid" style="margin-top: 1.5rem;">
+          <!-- Dynamic Fee Cards for AlphaBank and BetaBank -->
+        </div>
+
+        <form id="fee-action-form" class="form-grid" style="margin-top: 2rem;" novalidate>
+          <div class="form-group">
+            <label class="form-label" for="fee-lender">Lender Tranche</label>
+            <select id="fee-lender" class="form-input" required>
+              <option value="bankA">AlphaBank — $48M Undrawn ($60M total)</option>
+              <option value="bankB">BetaBank — $32M Undrawn ($40M total)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="fee-action-date">Period Settlement Date</label>
+            <input id="fee-action-date" class="form-input" type="date" required />
+          </div>
+          <div class="form-actions form-actions--inline">
+            <button type="button" class="btn btn-secondary" id="btn-accrue-fee">Accrue Fee</button>
+            <button type="button" class="btn btn-primary" id="btn-collect-fee">Collect & Issue Fee Receipt</button>
+          </div>
+        </form>
+
+        <div class="receipts-list" style="margin-top: 2rem;">
+          <h3 class="events-title">Commitment Fee Receipts</h3>
+          <div id="fee-receipts-list">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         TAB: COVENANTS MONITOR
+         ============================================================ -->
+    <section class="tab-panel" id="panel-covenants" aria-labelledby="tab-covenants">
+      <div class="section-card">
+        <div class="section-header-flex">
+          <div>
+            <h2 class="section-title">Facility Covenants & Compliance Engine</h2>
+            <p class="section-desc">Real-time financial ratio monitoring, quarterly compliance verification, waiver governance, and automated default acceleration.</p>
+          </div>
+          <div id="covenant-global-status-badge">
+            <span class="badge badge-active">Compliant</span>
+          </div>
+        </div>
+
+        <!-- Covenants Ratio Cards Grid -->
+        <div class="covenants-grid" id="covenants-metrics-grid" style="margin-top: 1.5rem;">
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Test Covenant Form -->
+        <div class="covenant-test-box" style="margin-top: 2rem; padding: 1.5rem; background: rgba(139,92,246,0.05); border: 1px solid rgba(139,92,246,0.2); border-radius: 12px;">
+          <h3 style="margin-bottom: 0.5rem; font-size: 1.1rem; color: #f8fafc;">Execute Quarterly Covenant Test (Agent Controller)</h3>
+          <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 1.25rem;">Submit actual financial metrics from the borrower's certified quarterly compliance certificate.</p>
+          
+          <form id="covenant-test-form" class="form-grid" novalidate>
+            <div class="form-group">
+              <label class="form-label" for="cov-test-date">Test Date</label>
+              <input id="cov-test-date" class="form-input" type="date" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cov-leverage">Leverage Ratio (Max 4.50x)</label>
+              <input id="cov-leverage" class="form-input" type="number" step="0.01" placeholder="e.g. 3.80" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cov-dscr">DSCR (Min 1.25x)</label>
+              <input id="cov-dscr" class="form-input" type="number" step="0.01" placeholder="e.g. 1.45" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cov-ltv">LTV (Max 75.0%)</label>
+              <input id="cov-ltv" class="form-input" type="number" step="0.01" placeholder="e.g. 62.0" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="cov-liquidity">Min Liquidity USD (Min $5M)</label>
+              <input id="cov-liquidity" class="form-input" type="number" step="100000" placeholder="e.g. 7200000" required />
+            </div>
+            <div class="form-actions form-actions--inline">
+              <button type="submit" class="btn btn-primary" id="btn-submit-cov-test">Run Compliance Test</button>
+              <button type="button" class="btn btn-warning" id="btn-waive-breach">Waive Breach</button>
+              <button type="button" class="btn btn-danger" id="btn-accelerate-breach">Accelerate Loan</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="covenant-notice-container" style="margin-top: 2rem;">
+          <!-- Acceleration Notice if any -->
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         TAB: FACILITY AMENDMENTS
+         ============================================================ -->
+    <section class="tab-panel" id="panel-amendments" aria-labelledby="tab-amendments">
+      <div class="section-card">
+        <div class="section-header-flex">
+          <div>
+            <h2 class="section-title">Facility Amendments & Multi-Party Governance</h2>
+            <p class="section-desc">Multi-party consent protocol for credit limit expansions, maturity extensions, and syndicate participant modifications.</p>
+          </div>
+          <span class="badge badge-canton">Atomic Multi-Party Voting</span>
+        </div>
+
+        <!-- Active Proposals Feed -->
+        <div id="amendment-proposals-container" style="margin-top: 1.5rem;">
+          <!-- Populated by JS -->
+        </div>
+
+        <!-- Propose Amendment Form -->
+        <div class="amendment-form-box" style="margin-top: 2rem; padding: 1.5rem; background: rgba(6,182,212,0.05); border: 1px solid rgba(6,182,212,0.2); border-radius: 12px;">
+          <h3 style="margin-bottom: 0.5rem; font-size: 1.1rem; color: #f8fafc;">Propose New Facility Amendment (Borrower & Agent)</h3>
+          <p style="font-size: 0.85rem; color: #94a3b8; margin-bottom: 1.25rem;">Requires unanimous consent for limit expansion/currency change, or simple majority for maturity and participant adjustments.</p>
+
+          <form id="amendment-proposal-form" class="form-grid" novalidate>
+            <div class="form-group">
+              <label class="form-label" for="amend-type">Amendment Type</label>
+              <select id="amend-type" class="form-input" required>
+                <option value="IncreaseCreditLimit">Increase Credit Limit (Unanimous Consent)</option>
+                <option value="ExtendMaturity">Extend Maturity Date (Majority Consent)</option>
+                <option value="ReduceCreditLimit">Voluntary Limit Reduction (Majority Consent)</option>
+                <option value="AddLender">Add Syndicate Lender (Majority Consent)</option>
+              </select>
+            </div>
+            <div class="form-group" id="amend-limit-group">
+              <label class="form-label" for="amend-new-limit">Proposed New Limit (USD)</label>
+              <input id="amend-new-limit" class="form-input" type="number" step="1000000" placeholder="e.g. 150000000" />
+            </div>
+            <div class="form-group" id="amend-maturity-group" style="display:none;">
+              <label class="form-label" for="amend-new-maturity">Proposed New Maturity Date</label>
+              <input id="amend-new-maturity" class="form-input" type="date" />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="amend-expiry">Voting Deadline</label>
+              <input id="amend-expiry" class="form-input" type="date" required />
+            </div>
+            <div class="form-group form-group--full">
+              <label class="form-label" for="amend-rationale">Business Rationale</label>
+              <textarea id="amend-rationale" class="form-input" rows="2" placeholder="e.g. Expansion financing for strategic infrastructure acquisition..." required></textarea>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="btn-submit-proposal">Submit Amendment Proposal</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="receipts-list" style="margin-top: 2rem;">
+          <h3 class="events-title">Executed Facility Amendment Records (On-Ledger)</h3>
+          <div id="amendment-records-list">
             <!-- Populated by JS -->
           </div>
         </div>

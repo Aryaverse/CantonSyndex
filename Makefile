@@ -122,15 +122,18 @@ test-verbose:
 start:
 	@printf "$(BLUE)==> Starting Canton LocalNet...$(NC)\n"
 	docker-compose -f $(COMPOSE_FILE) up -d
-	@printf "$(BLUE)==> Waiting for nodes to initialize (30s)...$(NC)\n"
-	@sleep 30
+	@./scripts/wait-for-canton.sh --timeout 45
 	@$(MAKE) status
 	@printf "\n$(GREEN)==> Canton LocalNet running.$(NC) Run: make deploy\n"
+
+.PHONY: wait-canton
+wait-canton:
+	@./scripts/wait-for-canton.sh --timeout 60
 
 .PHONY: start-with-navigator
 start-with-navigator:
 	docker-compose -f $(COMPOSE_FILE) --profile navigator up -d
-	@sleep 30
+	@./scripts/wait-for-canton.sh --timeout 45
 	@printf "$(GREEN)==> Navigator: http://localhost:7500$(NC)\n"
 
 .PHONY: stop
@@ -167,10 +170,10 @@ deploy: build-daml
 .PHONY: status
 status:
 	@printf "$(BLUE)==> Canton Node Health$(NC)\n"
-	@printf "  %-25s " "Synchronizer (9019):";   @curl -sf http://localhost:9019/health > /dev/null 2>&1 && printf "$(GREEN)UP$(NC)\n" || printf "$(RED)DOWN$(NC)\n"
-	@printf "  %-25s " "Agent/GlobalLeadBank (10012):"; curl -sf http://localhost:10012/health > /dev/null 2>&1 && printf "$(GREEN)UP$(NC)\n" || printf "$(RED)DOWN$(NC)\n"
-	@printf "  %-25s " "AlphaBank (10022):";     curl -sf http://localhost:10022/health > /dev/null 2>&1 && printf "$(GREEN)UP$(NC)\n" || printf "$(RED)DOWN$(NC)\n"
-	@printf "  %-25s " "BetaBank (10032):";      curl -sf http://localhost:10032/health > /dev/null 2>&1 && printf "$(GREEN)UP$(NC)\n" || printf "$(RED)DOWN$(NC)\n"
+	@printf "  %-32s " "Synchronizer (9019):";   curl -sf http://localhost:9019/health > /dev/null 2>&1 && printf "$(GREEN)UP$(NC)\n" || printf "$(RED)DOWN$(NC)\n"
+	@printf "  %-32s " "Goldman Sachs Node (10012):"; curl -sf http://localhost:10012/health > /dev/null 2>&1 && printf "$(GREEN)UP$(NC)\n" || printf "$(RED)DOWN$(NC)\n"
+	@printf "  %-32s " "JPMorgan Chase Node (10022):"; curl -sf http://localhost:10022/health > /dev/null 2>&1 && printf "$(GREEN)UP$(NC)\n" || printf "$(RED)DOWN$(NC)\n"
+	@printf "  %-32s " "Deutsche Bank Node (10032):";  curl -sf http://localhost:10032/health > /dev/null 2>&1 && printf "$(GREEN)UP$(NC)\n" || printf "$(RED)DOWN$(NC)\n"
 
 .PHONY: logs
 logs:
@@ -184,12 +187,12 @@ logs-sync:
 logs-agent:
 	docker-compose -f $(COMPOSE_FILE) logs -f --tail=100 canton-agent
 
-.PHONY: logs-banka
-logs-banka:
+.PHONY: logs-jpmc
+logs-jpmc:
 	docker-compose -f $(COMPOSE_FILE) logs -f --tail=100 canton-banka
 
-.PHONY: logs-bankb
-logs-bankb:
+.PHONY: logs-db
+logs-db:
 	docker-compose -f $(COMPOSE_FILE) logs -f --tail=100 canton-bankb
 
 # =============================================================================

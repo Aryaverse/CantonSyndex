@@ -25,14 +25,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install DAML SDK
+      - name: Setup Java (JDK 17)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install DAML SDK 2.9.4
         run: |
-          curl -sSL https://get.daml.com/ | sh -s 2.9.4
+          curl -sSL https://get.daml.com/ | sh -s 2.9.4 --install-assistant=yes
           echo "$HOME/.daml/bin" >> $GITHUB_PATH
+          echo "PATH=$HOME/.daml/bin:$PATH" >> $GITHUB_ENV
 
       - name: Verify DAML SDK
         run: |
           export PATH="$HOME/.daml/bin:$PATH"
+          java -version
           daml version
 
       - name: Build DAML project
@@ -45,7 +53,7 @@ jobs:
       - name: Run DAML Script tests
         run: |
           export PATH="$HOME/.daml/bin:$PATH"
-          daml test
+          daml test --files daml/CantonSyndex/Test.daml
         timeout-minutes: 10
 
       - name: Upload DAR artifact

@@ -23,12 +23,14 @@ sandbox.log
 # Test output
 test-output/
 
-# Coverage
-coverage/
-
 # Env
 .env
 .env.local
 
 # Documents
 *.pdf
+
+# Vercel
+.vercel/
+
+

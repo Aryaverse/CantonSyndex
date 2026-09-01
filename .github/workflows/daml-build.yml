@@ -33,10 +33,17 @@ jobs:
 
       - name: Install DAML SDK 2.9.4
         run: |
+          set -e
           mkdir -p /tmp/daml-install
           curl -SLf "https://github.com/digital-asset/daml/releases/download/v2.9.4/daml-sdk-2.9.4-linux.tar.gz" -o /tmp/daml-install/daml-sdk.tar.gz
-          tar -xzf /tmp/daml-install/daml-sdk.tar.gz -C /tmp/daml-install --strip-components=1
-          /tmp/daml-install/install.sh --install-assistant=yes
+          cd /tmp/daml-install
+          tar -xzf daml-sdk.tar.gz --strip-components=1 2>/dev/null || tar -xzf daml-sdk.tar.gz
+          if [ -f "./install.sh" ]; then
+            ./install.sh --install-assistant=yes
+          elif [ -d "sdk-2.9.4" ]; then
+            cd sdk-2.9.4
+            ./install.sh --install-assistant=yes
+          fi
           echo "$HOME/.daml/bin" >> $GITHUB_PATH
           echo "PATH=$HOME/.daml/bin:$PATH" >> $GITHUB_ENV
           rm -rf /tmp/daml-install
@@ -45,19 +52,19 @@ jobs:
         run: |
           export PATH="$HOME/.daml/bin:$PATH"
           java -version
-          daml version
+          daml version || $HOME/.daml/bin/daml version
 
       - name: Build DAML project
         run: |
           export PATH="$HOME/.daml/bin:$PATH"
-          daml build
+          daml build || $HOME/.daml/bin/daml build
         env:
           DAML_SDK_VERSION: '2.9.4'
 
       - name: Run DAML Script tests
         run: |
           export PATH="$HOME/.daml/bin:$PATH"
-          daml test --files daml/CantonSyndex/Test.daml
+          daml test --files daml/CantonSyndex/Test.daml || $HOME/.daml/bin/daml test --files daml/CantonSyndex/Test.daml
         timeout-minutes: 10
 
       - name: Upload DAR artifact

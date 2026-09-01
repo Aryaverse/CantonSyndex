@@ -209,6 +209,7 @@ vercel --prod --yes --scope pankajchaudhary
 ---
 
 ## 📜 Documentation Index
+- 🧪 **[Step-by-Step User Testing Guide](docs/USER_TESTING_GUIDE.md):** 10-scenario comprehensive testing guide & QA checklist.
 - 📘 **[Client Demonstration Guide](docs/CLIENT_DEMO_GUIDE.md):** 7-step institutional executive runbook.
 - 📐 **[Architecture Specification](docs/ARCHITECTURE.md):** Deep-dive into Canton sub-transaction privacy and synchronizer topologies.
 - 🔌 **[API Reference](docs/API_REFERENCE.md):** Complete TypeScript bridge and REST API endpoint reference.
